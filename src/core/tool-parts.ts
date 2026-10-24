@@ -50,6 +50,18 @@ function boundaryParse<T>(schema: TSchema, input: unknown): T | undefined {
 	return Value.Clean(schema, converted) as T;
 }
 
+/** Decode one extra JSON string layer only when an escaped code fence identifies it.
+ * Real multiline Markdown and literal backslashes in ordinary questions stay intact. */
+function restoreQuestionCode(text: string): string {
+	if (text.includes("\n") || !/(?:^|\\n)[ \t]{0,3}(?:`{3,}|~{3,})[^\s\\]*\\n/.test(text)) return text;
+	try {
+		const decoded: unknown = JSON.parse(`"${text}"`);
+		return typeof decoded === "string" ? decoded : text;
+	} catch {
+		return text;
+	}
+}
+
 /**
  * Quiz parse for DISPLAY: the shared authoring base, pre-refinement.
  * Both boundaries (the prober's quizInputBase, the teacher's quizInputObject
@@ -66,9 +78,23 @@ function boundaryParse<T>(schema: TSchema, input: unknown): T | undefined {
  * never have been posed (e.g. `correctAnswer: undefined`, which Convert
  * widens to "") renders as a quiet fallback, not a broken quiz.
  */
-/** Shape parsing never repairs authored text. The dock builds its answer
- * data from this source copy; recovery belongs exclusively to presentation
- * (ToolContentResponse), never option identities, grading, or snapshots. */
+/** Shape parsing never repairs authored math text (the dock builds its answer
+ * data from this source copy; math recovery belongs exclusively to presentation
+ * in ToolContentResponse, never option identities, grading, or snapshots),
+ * except decoding an extra JSON string layer on `question` when an escaped
+ * code fence identifies it. */
+function restoreQuestionTextDeep(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(restoreQuestionTextDeep);
+	if (typeof value === "object" && value !== null) {
+		const out: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(value)) {
+			out[k] = restoreQuestionTextDeep(k === "question" && typeof v === "string" ? restoreQuestionCode(v) : v);
+		}
+		return out;
+	}
+	return value;
+}
+
 export function parseQuizInput(input: unknown): QuizToolInput | undefined {
 	// quizDisplayInputSchema (question-core, owner 2026-10-03): base + the
 	// OPTIONAL `type` — new teach-phase records carry predict|check and the
@@ -80,7 +106,7 @@ export function parseQuizInput(input: unknown): QuizToolInput | undefined {
 	// wobble must heal HERE too or a posed quiz renders invisible (the
 	// tool-parts law). healEncodedArguments is the same pure pass the
 	// boundary's withArgumentHeal runs.
-	const healedInput = healEncodedArguments(input, quizDisplayInputSchema);
+	const healedInput = healEncodedArguments(restoreQuestionTextDeep(input), quizDisplayInputSchema);
 	const cleaned = boundaryParse<QuizToolInput>(quizDisplayInputSchema, healedInput);
 	if (!cleaned) return undefined;
 	if (quizInputProblems(cleaned).length > 0) return undefined;
@@ -94,7 +120,7 @@ export function parseQuizInput(input: unknown): QuizToolInput | undefined {
  * keying, so they parse to undefined exactly like the zod seam did).
  */
 export function parseAskInput(input: unknown): AskToolInput | undefined {
-	const cleaned = boundaryParse<AskToolInput>(askInputSchema, input);
+	const cleaned = boundaryParse<AskToolInput>(askInputSchema, restoreQuestionTextDeep(input));
 	if (!cleaned) return undefined;
 	if (askOptionProblems(cleaned.options ?? []).length > 0) return undefined;
 	return cleaned;
@@ -107,7 +133,7 @@ export function parseAskInput(input: unknown): AskToolInput | undefined {
  *  variants share the same fields; the teacher's nodeId is an unknown
  *  key Value.Clean strips, same as the quiz seam. */
 export function parseExplainInput(input: unknown): ExplainToolInput | undefined {
-	const cleaned = boundaryParse<ExplainToolInput>(explainDisplayInputSchema, input);
+	const cleaned = boundaryParse<ExplainToolInput>(explainDisplayInputSchema, restoreQuestionTextDeep(input));
 	if (!cleaned) return undefined;
 	if (explainInputProblems(cleaned).length > 0) return undefined;
 	return cleaned;
