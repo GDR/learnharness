@@ -75,6 +75,7 @@ import {
 	phaseTimeline,
 	teachStepIndex,
 	toolQuestionKind,
+	questionAllowsAskBefore,
 	questionNeedsReveal,
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
@@ -1142,9 +1143,11 @@ export function Chat({
 	});
 
 	const openQuestions = pendingQuestionCount(messages);
+	const predictionPending =
+		pending !== null && !requiresReveal && questionAllowsAskBefore(pending.tool, phaseAt3(messages));
 	const onAskBeforeCheck = () => {
-		if (!pending || !requiresReveal || compacting || busy) return;
-		if (!askBeforeCheckVisible(true, openQuestions)) return;
+		if (!pending || compacting || busy) return;
+		if (!askBeforeCheckVisible(requiresReveal, predictionPending, openQuestions)) return;
 		const t = textRef.current.trim();
 		if (!t) return;
 		preserveReadingRef.current = true;
@@ -1918,8 +1921,8 @@ function DockOverlay({
 	contextTokens: number | null;
 	pricing?: SessionPricing;
 	composer: React.ReactNode;
-	/** The ask box for a closed teach check. Mounted only while the check
-	 *  is still behind its reveal and it is the only open question. */
+	/** The ask box above a closed teach check or a prediction, when that
+	 *  call is the only open question. */
 	askComposer?: React.ReactNode;
 	openQuestions: number;
 	onSubmitAnswer: (output: QuestionAnswerData) => void;
@@ -1961,6 +1964,8 @@ function DockOverlay({
 	// revealed, the normal collapse machine rules apply untouched.
 	const [revealed, setRevealed] = useState(false);
 	const revealPending = requiresReveal && !revealed;
+	const predictionPending =
+		pending !== null && !requiresReveal && questionAllowsAskBefore(pending.tool, phase);
 
 	const pendingId = pending?.toolCallId ?? null;
 	const initialPendingRef = useRef(pendingId);
@@ -2350,10 +2355,11 @@ function DockOverlay({
 							claim={revealPending}
 						/>
 					)}
-					{/* Ask about the teaching just given, while the check stays
-					    closed. Notes stay in the field above; this send closes
-					    the call as notYet and the teacher poses the check again. */}
-					{askBeforeCheckVisible(revealPending, openQuestions) && askComposer && (
+					{/* Ask about the teaching just given. Above a closed check the
+					    notes stay in the field; above a prediction the box sits
+					    on the dock, open or folded. The send closes the call
+					    as notYet and the teacher poses the same question again. */}
+					{askBeforeCheckVisible(revealPending, predictionPending, openQuestions) && askComposer && (
 						<div
 							data-testid="ask-before-check"
 							className="pointer-events-auto mb-2 overflow-hidden rounded-2xl border bg-card shadow-lg"
