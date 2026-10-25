@@ -147,6 +147,7 @@ describe("parseAppearanceSettingsBody", () => {
 			fontFamily: "Some Font",
 			proseFontSize: 20,
 			sessionNameSerif: false,
+			autoCollapseQuestions: false,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
 		});
 		assert.ok(r.ok);
@@ -156,6 +157,7 @@ describe("parseAppearanceSettingsBody", () => {
 			fontFamily: "Some Font",
 			proseFontSize: 20,
 			sessionNameSerif: false,
+			autoCollapseQuestions: false,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
 		});
 	});
@@ -170,6 +172,7 @@ describe("parseAppearanceSettingsBody", () => {
 			{ proseFontSize: 30 },
 			{ proseFontSize: 64.5 },
 			{ sessionNameSerif: 1 },
+			{ autoCollapseQuestions: "no" },
 			{ mdRendering: { headingWeight: 1000 } },
 			{ mdRendering: { boldColor: "red" } },
 		];
