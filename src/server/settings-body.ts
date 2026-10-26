@@ -195,6 +195,19 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		}
 		settings.graphTools = graphTools.enabled === undefined ? {} : { enabled: graphTools.enabled };
 	}
+	if (raw.obsidianFolders !== undefined) {
+		if (!Array.isArray(raw.obsidianFolders)) {
+			return { ok: false, error: "obsidianFolders must be an array of folder paths" };
+		}
+		const folders: string[] = [];
+		for (const item of raw.obsidianFolders) {
+			if (typeof item !== "string" || !item.trim()) {
+				return { ok: false, error: "obsidianFolders entries must be non-empty strings" };
+			}
+			folders.push(item.trim());
+		}
+		settings.obsidianFolders = Array.from(new Set(folders));
+	}
 	return { ok: true, settings };
 }
 

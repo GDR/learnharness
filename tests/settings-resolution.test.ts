@@ -28,6 +28,7 @@ describe("resolveSettings", () => {
 		assert.deepEqual(eff.agent.tools, {});
 		assert.deepEqual(eff.agent.prompts, {});
 		assert.deepEqual(eff.agent.search, {});
+		assert.deepEqual(eff.agent.obsidianFolders, []);
 		// BYOK (owner, 2026-09-22): no factory floor — every role undefined,
 		// every slot null. No phantom ids anywhere.
 		for (const role of BACKGROUND_MODEL_ROLES) {
@@ -57,6 +58,7 @@ describe("resolveSettings", () => {
 				tools: { research: false },
 				prompts: { "system-prompt.md": true },
 				search: { engine: "tavily" },
+				obsidianFolders: ["/home/user/vault"],
 			},
 			appearance: { mode: "light", proseFontSize: 20, mdRendering: { headingWeight: 600 } },
 			graph: { enabled: false },
@@ -73,6 +75,7 @@ describe("resolveSettings", () => {
 		assert.deepEqual(eff.agent.search, { engine: "tavily" });
 		assert.deepEqual(eff.agent.tools, { research: false });
 		assert.deepEqual(eff.agent.prompts, { "system-prompt.md": true });
+		assert.deepEqual(eff.agent.obsidianFolders, ["/home/user/vault"]);
 		assert.equal(eff.appearance.mode, "light");
 		assert.equal(eff.appearance.proseFontSize, 20);
 		assert.equal(eff.appearance.mdRendering.headingWeight, 600);
@@ -85,6 +88,11 @@ describe("resolveSettings", () => {
 		// The chunk budget rides the same resolution: stored value wins.
 		const budgeted = resolveSettings({ version: 1, graph: { extractionChunkTokens: 2000 } });
 		assert.deepEqual(budgeted.graph, { enabled: true, rendering: true, extractionChunkTokens: 2000 });
+	});
+
+	it("obsidianFolders: absent key in record resolves to []", () => {
+		const eff = resolveSettings({ version: 1, agent: {} });
+		assert.deepEqual(eff.agent.obsidianFolders, []);
 	});
 
 	it("graph rendering (2026-10-06): display-only — off resolves off, extraction untouched", () => {

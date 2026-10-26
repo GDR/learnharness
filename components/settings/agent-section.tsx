@@ -223,6 +223,30 @@ export function composePromptSwitch(agent: AgentSettings | undefined, path: stri
 	return { ...agent, prompts };
 }
 
+/** Compose: add one Obsidian folder path. Trims whitespace; ignores empty
+ *  or duplicate entries. Pure — exported for tests. */
+export function composeAddObsidianFolder(agent: AgentSettings | undefined, folder: string): AgentSettings {
+	const trimmed = folder.trim();
+	if (!trimmed) return { ...agent };
+	const current = agent?.obsidianFolders ?? [];
+	if (current.includes(trimmed)) return { ...agent };
+	return { ...agent, obsidianFolders: [...current, trimmed] };
+}
+
+/** Compose: remove one Obsidian folder path by index or by path string.
+ *  Pure — exported for tests. */
+export function composeRemoveObsidianFolder(
+	agent: AgentSettings | undefined,
+	indexOrFolder: number | string,
+): AgentSettings {
+	const current = agent?.obsidianFolders ?? [];
+	const next =
+		typeof indexOrFolder === "number"
+			? current.filter((_, i) => i !== indexOrFolder)
+			: current.filter((f) => f !== indexOrFolder);
+	return { ...agent, obsidianFolders: next };
+}
+
 /** The collapsed select look (owner: "the look of the collapsed menu is
  *  good") — now a button that opens the shared model-picker dropdown. */
 function MenuTrigger({
@@ -320,6 +344,7 @@ export function AgentSection({
 	 *  row), which kind. */
 	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" } | null>(null);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
+	const [newFolder, setNewFolder] = useState("");
 
 	const refreshSearch = () =>
 		fetch("/api/search")
@@ -847,6 +872,76 @@ export function AgentSection({
 						</SettingsRow>
 					);
 				})()}
+			</SettingsGroup>
+
+			<SettingsGroup label="Obsidian folders" testid="group-obsidian-folders">
+				<p className="text-xs text-muted-foreground/70">
+					Vault or project folders where agent notes tools are permitted to create and edit Markdown files.
+				</p>
+				<div className="mt-2 flex flex-col gap-1.5">
+					{((agent?.obsidianFolders ?? []).length === 0) ? (
+						<p className="py-1 text-xs text-muted-foreground/50" data-testid="obsidian-folders-empty">
+							No Obsidian folders configured
+						</p>
+					) : (
+						(agent?.obsidianFolders ?? []).map((folder, index) => (
+							<div
+								key={folder}
+								data-testid={`obsidian-folder-row-${index}`}
+								className="flex items-center justify-between gap-3 rounded border border-border/40 bg-muted/20 px-2 py-1.5"
+							>
+								<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground" title={folder}>
+									{folder}
+								</span>
+								<button
+									type="button"
+									onClick={() => onSectionChange(composeRemoveObsidianFolder(agent, index))}
+									data-testid={`remove-obsidian-folder-${index}`}
+									className="shrink-0 text-xs text-muted-foreground/70 underline-offset-2 hover:text-red-500 hover:underline"
+								>
+									Remove
+								</button>
+							</div>
+						))
+					)}
+				</div>
+				<div className="mt-2 flex items-center gap-2">
+					<input
+						type="text"
+						value={newFolder}
+						onChange={(e) => setNewFolder(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" && newFolder.trim()) {
+								e.preventDefault();
+								onSectionChange(composeAddObsidianFolder(agent, newFolder));
+								setNewFolder("");
+							}
+						}}
+						placeholder="Add folder path (e.g. /Users/name/Vault)"
+						aria-label="New Obsidian folder path"
+						data-testid="input-obsidian-folder"
+						className="h-7 flex-1 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60"
+					/>
+					<button
+						type="button"
+						disabled={!newFolder.trim()}
+						onClick={() => {
+							if (newFolder.trim()) {
+								onSectionChange(composeAddObsidianFolder(agent, newFolder));
+								setNewFolder("");
+							}
+						}}
+						data-testid="button-add-obsidian-folder"
+						className={cn(
+							"h-7 px-3 text-xs font-medium rounded-sm border border-border transition-colors",
+							newFolder.trim()
+								? "bg-muted text-foreground hover:bg-muted/80"
+								: "cursor-not-allowed text-muted-foreground/40 bg-muted/30",
+						)}
+					>
+						Add
+					</button>
+				</div>
 			</SettingsGroup>
 
 			<SettingsGroup label="Context" testid="group-context">

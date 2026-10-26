@@ -84,7 +84,36 @@ describe("AgentSection (thin SSR)", () => {
 		}
 		assert.ok(html.includes('data-testid="group-models"'), "Models sub-group");
 		assert.ok(html.includes('data-testid="group-tools"'), "Tools sub-group");
+		assert.ok(html.includes('data-testid="group-obsidian-folders"'), "Obsidian folders sub-group");
 		assert.ok(html.includes('data-testid="group-prompts"'), "System prompts sub-group");
+	});
+
+	it("renders the Obsidian folders group: empty notice when unset, folder list and remove buttons when set", () => {
+		const emptyHtml = renderToStaticMarkup(
+			<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(emptyHtml.includes('data-testid="group-obsidian-folders"'), "group-obsidian-folders present");
+		assert.ok(emptyHtml.includes('data-testid="obsidian-folders-empty"'), "empty notice present");
+		assert.ok(emptyHtml.includes("No Obsidian folders configured"));
+		assert.ok(emptyHtml.includes('data-testid="input-obsidian-folder"'));
+		assert.ok(emptyHtml.includes('data-testid="button-add-obsidian-folder"'));
+
+		const populatedHtml = renderToStaticMarkup(
+			<AgentSection
+				agent={{ obsidianFolders: ["/Users/test/vault", "/Users/test/notes"] }}
+				models={undefined}
+				graph={undefined}
+				onSectionChange={() => {}}
+				onModelsChange={() => {}}
+			/>,
+		);
+		assert.ok(!populatedHtml.includes('data-testid="obsidian-folders-empty"'));
+		assert.ok(populatedHtml.includes('data-testid="obsidian-folder-row-0"'));
+		assert.ok(populatedHtml.includes('data-testid="obsidian-folder-row-1"'));
+		assert.ok(populatedHtml.includes("/Users/test/vault"));
+		assert.ok(populatedHtml.includes("/Users/test/notes"));
+		assert.ok(populatedHtml.includes('data-testid="remove-obsidian-folder-0"'));
+		assert.ok(populatedHtml.includes('data-testid="remove-obsidian-folder-1"'));
 	});
 
 	it("the search-engine row renders with its live reason (search wave 2026-09-20)", () => {
