@@ -199,3 +199,142 @@ export function truncateGrepLine(line: string): { text: string; wasTruncated: bo
 	if (line.length <= GREP_MAX_LINE_LENGTH) return { text: line, wasTruncated: false };
 	return { text: `${line.slice(0, GREP_MAX_LINE_LENGTH)}… [truncated]`, wasTruncated: true };
 }
+
+/** Markdown extensions permitted for write/edit tools. */
+export const ALLOWED_MARKDOWN_EXTENSIONS = new Set([".md", ".markdown", ".mdx"]);
+
+/** Directory segments strictly forbidden for agent mutation. */
+export const FORBIDDEN_OBSIDIAN_DIRS = new Set([".obsidian", ".git", "node_modules", ".Trash"]);
+
+function isInsideFolder(parent: string, child: string): boolean {
+	const rel = path.relative(parent, child);
+	return !rel.startsWith("..") && !path.isAbsolute(rel) && rel !== "";
+}
+
+/**
+ * Validates and resolves a file path strictly scoped to configured Obsidian folders.
+ * Enforces:
+ * 1. obsidianFolders must be configured and non-empty.
+ * 2. File extension must be .md, .markdown, or .mdx (case-insensitive).
+ * 3. Path must not traverse through forbidden directories (.obsidian, .git, node_modules, .Trash).
+ * 4. Path must resolve within at least one configured Obsidian folder (preventing traversal and root escapes).
+ * 5. Symlinks cannot escape configured folders or enter forbidden directories (checks canonical paths).
+ */
+export async function resolveAndValidateObsidianPath(
+	rawPath: string,
+	obsidianFolders?: readonly string[],
+): Promise<string> {
+	if (!obsidianFolders || obsidianFolders.length === 0) {
+		throw new Error("No Obsidian folders are configured in Settings. Please add an Obsidian folder in Settings -> Agent first.");
+	}
+
+	if (!rawPath || typeof rawPath !== "string" || !rawPath.trim()) {
+		throw new Error("Path must not be empty.");
+	}
+
+	const trimmed = rawPath.trim();
+	const normalizedRoots = obsidianFolders
+		.map((f) => (f.startsWith("~") ? f.replace(/^~(?=$|\/|\\)/, os.homedir()) : f))
+		.map((f) => path.resolve(f));
+
+	if (normalizedRoots.length === 0) {
+		throw new Error("No Obsidian folders are configured in Settings. Please add an Obsidian folder in Settings -> Agent first.");
+	}
+
+	// Extension check (case-insensitive)
+	const ext = path.extname(trimmed).toLowerCase();
+	if (!ALLOWED_MARKDOWN_EXTENSIONS.has(ext)) {
+		throw new Error(`File extension '${ext}' is not permitted. Only Markdown files (.md, .markdown, .mdx) are allowed.`);
+	}
+
+	// Resolve target candidate path
+	let candidate: string;
+	if (trimmed.startsWith("~")) {
+		candidate = path.resolve(trimmed.replace(/^~(?=$|\/|\\)/, os.homedir()));
+	} else if (path.isAbsolute(trimmed)) {
+		candidate = path.resolve(trimmed);
+	} else {
+		// Relative path: check if it exists in any configured folder; otherwise resolve against first folder
+		const potentialPaths = normalizedRoots.map((root) => path.resolve(root, trimmed));
+		let selected = potentialPaths[0]!;
+		for (const p of potentialPaths) {
+			try {
+				await fs.stat(p);
+				selected = p;
+				break;
+			} catch {
+				// keep looking
+			}
+		}
+		candidate = selected;
+	}
+
+	// Check forbidden directory segments on candidate path
+	const candidateSegments = candidate.split(/[/\\]/).filter(Boolean);
+	if (candidateSegments.some((s) => FORBIDDEN_OBSIDIAN_DIRS.has(s))) {
+		throw new Error("Access to protected directory (.obsidian, .git, node_modules, .Trash) is forbidden.");
+	}
+
+	// Confinement check: candidate must be inside at least one configured folder
+	const insideLogical = normalizedRoots.some((root) => isInsideFolder(root, candidate));
+	if (!insideLogical) {
+		throw new Error(`Path '${rawPath}' is outside all configured Obsidian folders.`);
+	}
+
+	// Canonical folder roots (resolving symlinks if folders exist)
+	const canonicalRoots = await Promise.all(
+		normalizedRoots.map(async (root) => {
+			try {
+				return await fs.realpath(root);
+			} catch {
+				return root;
+			}
+		}),
+	);
+
+	// Symlink escape check:
+	// If the file exists, inspect its realpath.
+	// If the file does NOT exist (new file for write), inspect the realpath of the deepest existing ancestor directory.
+	let existingPathToCheck: string | null = null;
+	try {
+		await fs.lstat(candidate);
+		existingPathToCheck = candidate;
+	} catch (err: unknown) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+			let ancestor = path.dirname(candidate);
+			while (ancestor !== path.dirname(ancestor)) {
+				try {
+					await fs.stat(ancestor);
+					existingPathToCheck = ancestor;
+					break;
+				} catch (aErr: unknown) {
+					if ((aErr as NodeJS.ErrnoException).code === "ENOENT") {
+						ancestor = path.dirname(ancestor);
+						continue;
+					}
+					throw aErr;
+				}
+			}
+		} else {
+			throw err;
+		}
+	}
+
+	if (existingPathToCheck) {
+		const realPath = await fs.realpath(existingPathToCheck);
+		const realSegments = realPath.split(/[/\\]/).filter(Boolean);
+		if (realSegments.some((s) => FORBIDDEN_OBSIDIAN_DIRS.has(s))) {
+			throw new Error("Access to protected directory (.obsidian, .git, node_modules, .Trash) is forbidden.");
+		}
+		const isFile = existingPathToCheck === candidate;
+		const insideCanonical = canonicalRoots.some((root) =>
+			isFile ? isInsideFolder(root, realPath) : realPath === root || isInsideFolder(root, realPath),
+		);
+		if (!insideCanonical) {
+			throw new Error(`Path '${rawPath}' is outside all configured Obsidian folders.`);
+		}
+	}
+
+	return candidate;
+}
+
