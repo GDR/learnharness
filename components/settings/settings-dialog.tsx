@@ -50,6 +50,7 @@ import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
+import { ProjectSection } from "./project-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 import { LocalAgentUIProvider } from "./local-agent-connections";
@@ -59,6 +60,7 @@ import { LocalAgentUIProvider } from "./local-agent-connections";
  *  real question users ask). */
 const SECTIONS = [
 	{ id: "keys", label: "Providers" },
+	{ id: "projects", label: "Projects" },
 	{ id: "agent", label: "Agent" },
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
@@ -356,6 +358,7 @@ export function SettingsDialogBody({
 						</p>
 					) : (
 						<div>
+							{active === "projects" && <ProjectSection />}
 							{active === "general" && (
 								<SettingsSection
 									title="General"

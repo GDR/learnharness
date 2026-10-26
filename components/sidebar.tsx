@@ -5,8 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
-import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import type { ChatDeleteMode, Project } from "@/src/core";
+import { CheckIcon, ChevronDownIcon, DumbbellIcon, FolderIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -21,7 +21,7 @@ import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
-import { notifySettingsSaved } from "@/components/settings-signal";
+import { notifySettingsSaved, notifyProjectChanged, useProjectChanged } from "@/components/settings-signal";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -386,6 +386,174 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
+export function ProjectSwitcher() {
+	const [projects, setProjects] = useState<Project[]>([]);
+	const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+	const [open, setOpen] = useState(false);
+	const [loading, setLoading] = useState(true);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const menuRef = useRef<HTMLDivElement>(null);
+	const { open: openSettings } = useSettingsDialog();
+
+	const load = useCallback(async () => {
+		try {
+			const res = await fetch("/api/projects");
+			if (!res.ok) return;
+			const data = (await res.json()) as { projects: Project[]; activeProjectId: string | null };
+			setProjects(data.projects || []);
+			setActiveProjectId(data.activeProjectId || null);
+		} catch {
+			// ignore fetch error on offline/SSR
+		} finally {
+			setLoading(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		void load();
+	}, [load]);
+
+	useProjectChanged(() => {
+		void load();
+	});
+
+	// Close on click outside or escape
+	useEffect(() => {
+		if (!open) return;
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				e.stopPropagation();
+				setOpen(false);
+			}
+		};
+		const onMouseDown = (e: MouseEvent) => {
+			if (
+				triggerRef.current?.contains(e.target as Node) ||
+				menuRef.current?.contains(e.target as Node)
+			) {
+				return;
+			}
+			setOpen(false);
+		};
+		window.addEventListener("keydown", onKeyDown, { capture: true });
+		window.addEventListener("mousedown", onMouseDown);
+		return () => {
+			window.removeEventListener("keydown", onKeyDown, { capture: true });
+			window.removeEventListener("mousedown", onMouseDown);
+		};
+	}, [open]);
+
+	const activeProject = projects.find((p) => p.id === activeProjectId);
+
+	const handleSelect = async (projectId: string) => {
+		if (projectId === activeProjectId) {
+			setOpen(false);
+			return;
+		}
+		try {
+			const res = await fetch("/api/projects/active", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ projectId }),
+			});
+			if (res.ok) {
+				setActiveProjectId(projectId);
+				notifyProjectChanged(projectId);
+			}
+		} catch {
+			// ignore failure
+		} finally {
+			setOpen(false);
+		}
+	};
+
+	return (
+		<div className="mx-3 mb-2" data-testid="project-switcher">
+			<button
+				ref={triggerRef}
+				type="button"
+				data-testid="project-switcher-trigger"
+				onClick={() => setOpen((prev) => !prev)}
+				aria-expanded={open}
+				aria-haspopup="true"
+				className="flex w-full items-center justify-between rounded-md border border-border/60 bg-background/50 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+			>
+				<span className="flex items-center gap-1.5 truncate">
+					<FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+					<span className="truncate" data-testid="project-switcher-name">
+						{activeProject?.name || (loading ? "Loading…" : "Default Project")}
+					</span>
+				</span>
+				<ChevronDownIcon
+					className={cn(
+						"size-3.5 shrink-0 text-muted-foreground transition-transform",
+						open && "rotate-180",
+					)}
+				/>
+			</button>
+
+			{open && (
+				<MenuShell
+					anchorRef={triggerRef}
+					preferredSide="down"
+					align="left"
+					testid="project-switcher-menu"
+					menuClass="flex w-64 flex-col rounded-md border border-border bg-card p-1 text-xs shadow-lg"
+				>
+					<div
+						ref={menuRef}
+						className="flex flex-col"
+					>
+						<div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+							Workspaces
+						</div>
+						<div className="flex max-h-52 flex-col gap-0.5 overflow-y-auto py-0.5">
+							{projects.map((p) => {
+								const isSelected = p.id === activeProjectId;
+								return (
+									<button
+										key={p.id}
+										type="button"
+										data-testid={`project-item-${p.id}`}
+										onClick={() => void handleSelect(p.id)}
+										className={cn(
+											"flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left transition-colors",
+											isSelected
+												? "bg-accent text-accent-foreground font-medium"
+												: "text-foreground hover:bg-accent/50",
+										)}
+									>
+										<span className="truncate">{p.name}</span>
+										{isSelected && (
+											<CheckIcon
+												className="size-3 shrink-0 text-foreground"
+												data-testid="project-item-checked"
+											/>
+										)}
+									</button>
+								);
+							})}
+						</div>
+						<div className="my-1 border-t border-border" />
+						<button
+							type="button"
+							data-testid="project-manage-button"
+							onClick={() => {
+								setOpen(false);
+								openSettings("projects");
+							}}
+							className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						>
+							<SettingsIcon className="size-3" />
+							<span>Manage Projects…</span>
+						</button>
+					</div>
+				</MenuShell>
+			)}
+		</div>
+	);
+}
+
 function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
@@ -688,6 +856,8 @@ function SessionsSidebar() {
 						</Button>
 					</Hint>
 				</div>
+
+				<ProjectSwitcher />
 
 				{/* Two doors, STACKED (owner round 8, 2026-10-05 — was a
 				    half/half row): full-width rows read cleaner and give the
