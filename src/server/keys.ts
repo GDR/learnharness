@@ -53,6 +53,7 @@ import {
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
 import { isSubscriptionProvider, subscriptionConnected } from "../agent/subscription-connections.ts";
+import { bootstrapAntigravityEnv } from "@earendil-works/pi-ai/providers/antigravity";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
 // module; the snapshot must not re-run and misread fill-gapped vars as real
@@ -100,6 +101,9 @@ export function envKeysIgnored(): boolean {
  * resurrects (its file entry is gone too).
  */
 export function initAuthEnv(): void {
+	if (!envKeysIgnored()) {
+		bootstrapAntigravityEnv();
+	}
 	const record = boot();
 	const fileVars = authStore.authVars();
 	const managed = new Set<string>([
