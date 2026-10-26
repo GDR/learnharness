@@ -265,3 +265,36 @@ export const projectContextSchema = z.object({
 		"sources must be a SourceStore object",
 	),
 });
+
+// ─── Legacy Migration Checkpoint ─────────────────────────────────────────────
+
+export interface MigrationCheckpoint {
+	status: "not_started" | "in_progress" | "completed" | "failed";
+	startedAt?: string;
+	completedAt?: string;
+	migratedCounts: {
+		chats: number;
+		graphFiles: number;
+		jobs: number;
+		practice: number;
+		vaults: number;
+		sources: number;
+	};
+	error?: string;
+}
+
+export const migrationCheckpointSchema = z.object({
+	status: z.enum(["not_started", "in_progress", "completed", "failed"]),
+	startedAt: z.string().optional(),
+	completedAt: z.string().optional(),
+	migratedCounts: z.object({
+		chats: z.number().int().nonnegative(),
+		graphFiles: z.number().int().nonnegative(),
+		jobs: z.number().int().nonnegative(),
+		practice: z.number().int().nonnegative(),
+		vaults: z.number().int().nonnegative(),
+		sources: z.number().int().nonnegative(),
+	}),
+	error: z.string().optional(),
+});
+
