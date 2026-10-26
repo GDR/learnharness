@@ -59,15 +59,28 @@ export function createVaultRegistry(customDataDir?: string): VaultRegistry {
 
 	async function registerVault(input: Omit<Vault, "id"> & { id?: VaultId }): Promise<Vault> {
 		return withLock(async () => {
-			const id: VaultId = input.id ?? `vault_${crypto.randomUUID().slice(0, 8)}`;
+			if (!input.displayName || typeof input.displayName !== "string" || !input.displayName.trim()) {
+				throw new Error("displayName cannot be empty");
+			}
+			const id: VaultId = input.id ? input.id.trim() : `vault_${crypto.randomUUID().slice(0, 8)}`;
 			const vault: Vault = {
 				id,
 				displayName: input.displayName.trim(),
 				kind: "obsidian",
-				bindings: input.bindings.map((b) => ({
-					deviceId: b.deviceId.trim(),
+				bindings: (input.bindings || []).map((b) => ({
+					deviceId: b.deviceId ? b.deviceId.trim() : "local",
 					rootPath: path.resolve(b.rootPath),
-					status: b.status,
+					status:
+						b.status ??
+						(() => {
+							try {
+								return fs.existsSync(b.rootPath) && fs.statSync(b.rootPath).isDirectory()
+									? "available"
+									: "unavailable";
+							} catch {
+								return "unavailable";
+							}
+						})(),
 				})),
 			};
 
@@ -112,6 +125,107 @@ export function createVaultRegistry(customDataDir?: string): VaultRegistry {
 		});
 	}
 
+	async function updateVault(
+		id: VaultId,
+		patch: { displayName?: string; bindings?: VaultBinding[] },
+	): Promise<Vault> {
+		return withLock(async () => {
+			const vaults = await readVaultsRecord();
+			const vault = vaults[id];
+			if (!vault) {
+				throw new Error(`Vault "${id}" not found`);
+			}
+
+			if (patch.displayName !== undefined) {
+				const trimmed = patch.displayName.trim();
+				if (!trimmed) {
+					throw new Error("displayName cannot be empty");
+				}
+				vault.displayName = trimmed;
+			}
+
+			if (patch.bindings !== undefined) {
+				vault.bindings = patch.bindings.map((b) => {
+					const normalized: VaultBinding = {
+						deviceId: b.deviceId ? b.deviceId.trim() : "local",
+						rootPath: path.resolve(b.rootPath),
+						status:
+							b.status ??
+							(() => {
+								try {
+									return fs.existsSync(b.rootPath) && fs.statSync(b.rootPath).isDirectory()
+										? "available"
+										: "unavailable";
+								} catch {
+									return "unavailable";
+								}
+							})(),
+					};
+					vaultBindingSchema.parse(normalized);
+					return normalized;
+				});
+			}
+
+			vaultSchema.parse(vault);
+			await writeVaultsRecord(vaults);
+			return vault;
+		});
+	}
+
+	async function checkVaultAvailability(id: VaultId): Promise<Vault | null> {
+		return withLock(async () => {
+			const vaults = await readVaultsRecord();
+			const vault = vaults[id];
+			if (!vault) return null;
+
+			let modified = false;
+			for (const binding of vault.bindings) {
+				let isDir = false;
+				try {
+					isDir = fs.existsSync(binding.rootPath) && fs.statSync(binding.rootPath).isDirectory();
+				} catch {
+					isDir = false;
+				}
+				const newStatus = isDir ? "available" : "unavailable";
+				if (binding.status !== newStatus) {
+					binding.status = newStatus;
+					modified = true;
+				}
+			}
+
+			if (modified) {
+				await writeVaultsRecord(vaults);
+			}
+			return vault;
+		});
+	}
+
+	async function checkAllVaultsAvailability(): Promise<Vault[]> {
+		return withLock(async () => {
+			const vaults = await readVaultsRecord();
+			let modified = false;
+			for (const vault of Object.values(vaults)) {
+				for (const binding of vault.bindings) {
+					let isDir = false;
+					try {
+						isDir = fs.existsSync(binding.rootPath) && fs.statSync(binding.rootPath).isDirectory();
+					} catch {
+						isDir = false;
+					}
+					const newStatus = isDir ? "available" : "unavailable";
+					if (binding.status !== newStatus) {
+						binding.status = newStatus;
+						modified = true;
+					}
+				}
+			}
+			if (modified) {
+				await writeVaultsRecord(vaults);
+			}
+			return Object.values(vaults);
+		});
+	}
+
 	async function deleteVault(id: VaultId): Promise<boolean> {
 		return withLock(async () => {
 			const vaults = await readVaultsRecord();
@@ -123,11 +237,15 @@ export function createVaultRegistry(customDataDir?: string): VaultRegistry {
 	}
 
 	return {
+		dataDir,
 		listVaults,
 		getVault,
 		registerVault,
 		updateBinding,
+		updateVault,
 		deleteVault,
+		checkVaultAvailability,
+		checkAllVaultsAvailability,
 	};
 }
 

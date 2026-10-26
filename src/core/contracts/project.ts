@@ -29,7 +29,44 @@ export const projectIdSchema = z
 	.min(1, "projectId cannot be empty")
 	.regex(projectIdRegex, "projectId must contain only letters, numbers, underscores, and hyphens");
 
-export const vaultIdSchema = z.string().min(1, "vaultId cannot be empty");
+export const vaultIdRegex = /^[A-Za-z0-9_-]+$/;
+
+export const vaultIdSchema = z
+	.string()
+	.min(1, "vaultId cannot be empty")
+	.regex(vaultIdRegex, "vaultId must contain only letters, numbers, underscores, and hyphens");
+
+export class InvalidVaultIdError extends Error {
+	readonly status = 400;
+	constructor(message = "Invalid vaultId") {
+		super(message);
+		this.name = "InvalidVaultIdError";
+	}
+}
+
+export class VaultNotFoundError extends Error {
+	readonly status = 404;
+	readonly vaultId: string;
+	constructor(vaultId: string) {
+		super(`Vault not found: ${vaultId}`);
+		this.name = "VaultNotFoundError";
+		this.vaultId = vaultId;
+	}
+}
+
+export function validateVaultId(raw: unknown): VaultId {
+	if (typeof raw !== "string" || !raw.trim()) {
+		throw new InvalidVaultIdError("vaultId must be a non-empty string");
+	}
+	const result = vaultIdSchema.safeParse(raw.trim());
+	if (!result.success) {
+		throw new InvalidVaultIdError(
+			result.error.issues[0]?.message ?? `Invalid vaultId format: "${String(raw)}"`,
+		);
+	}
+	return result.data;
+}
+
 export const sourceIdSchema = z.string().min(1, "sourceId cannot be empty");
 export const documentIdSchema = z.string().min(1, "documentId cannot be empty");
 export const evidenceIdSchema = z.string().min(1, "evidenceId cannot be empty");

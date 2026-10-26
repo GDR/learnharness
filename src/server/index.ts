@@ -47,7 +47,8 @@ export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web
 // Local agent connections (§8.2): Claude Code / Antigravity status + controls.
 export * from "./local-agents.ts";
 export { sessionCost } from "./pricing.ts";
-// Multi-project workspace isolation & Obsidian integration (Milestone A).
+// Multi-project workspace isolation & Obsidian integration (Milestones A & B).
 export * from "./projects.ts";
+export * from "./vaults.ts";
 export { createVaultRegistry, getVaultRegistry, setVaultRegistry } from "../store/vaults.ts";
 export { runLegacyMigration } from "./migration/legacy-migration.ts";

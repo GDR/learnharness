@@ -258,6 +258,7 @@ export type ProjectPatch = Partial<Omit<Project, "id" | "createdAt" | "settings"
 };
 
 export interface ProjectStore {
+	readonly dataDir?: string;
 	listProjects(): Promise<Project[]>;
 	getProject(id: ProjectId): Promise<Project | null>;
 	createProject(input: {
@@ -276,11 +277,18 @@ export interface ProjectStore {
 // ─── VaultRegistry — globally registered Obsidian vaults across devices ───────
 
 export interface VaultRegistry {
+	readonly dataDir?: string;
 	listVaults(): Promise<Vault[]>;
 	getVault(id: VaultId): Promise<Vault | null>;
 	registerVault(vault: Omit<Vault, "id"> & { id?: VaultId }): Promise<Vault>;
 	updateBinding(vaultId: VaultId, binding: VaultBinding): Promise<Vault>;
-	deleteVault?(id: VaultId): Promise<boolean>;
+	updateVault(
+		id: VaultId,
+		patch: { displayName?: string; bindings?: VaultBinding[] },
+	): Promise<Vault>;
+	deleteVault(id: VaultId): Promise<boolean>;
+	checkVaultAvailability?(id: VaultId): Promise<Vault | null>;
+	checkAllVaultsAvailability?(): Promise<Vault[]>;
 }
 
 // ─── SourceStore — project-scoped attached sources and documents ─────────────

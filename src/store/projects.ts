@@ -336,6 +336,7 @@ export function createProjectStore(customDataDir?: string): ProjectStore {
 	}
 
 	return {
+		dataDir,
 		listProjects,
 		getProject,
 		createProject,

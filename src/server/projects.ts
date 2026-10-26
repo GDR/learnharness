@@ -78,7 +78,10 @@ export async function resolveProjectContext(
 	options?: ProjectContextResolutionOptions,
 ): Promise<ProjectContext> {
 	const validId = validateProjectId(projectId);
-	const dataDir = options?.dataDir ? path.resolve(options.dataDir) : PATHS.data;
+	const defaultStore = getProjectStore();
+	const dataDir = options?.dataDir
+		? path.resolve(options.dataDir)
+		: (options?.projectStore?.dataDir ? path.resolve(options.projectStore.dataDir) : (defaultStore.dataDir ? path.resolve(defaultStore.dataDir) : PATHS.data));
 	const cacheKey = `${dataDir}:${validId}`;
 
 	const cached = projectContextCache.get(cacheKey);
@@ -88,7 +91,7 @@ export async function resolveProjectContext(
 
 	const resolutionPromise = (async () => {
 		const pStore =
-			options?.projectStore ?? (options?.dataDir ? createProjectStore(options.dataDir) : getProjectStore());
+			options?.projectStore ?? (options?.dataDir ? createProjectStore(options.dataDir) : defaultStore);
 		const project = await pStore.getProject(validId);
 		if (!project) {
 			throw new ProjectNotFoundError(validId);
