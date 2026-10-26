@@ -26,6 +26,7 @@ import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
+import { calculateDockMaxH } from "@/components/dock-height";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -2017,8 +2018,10 @@ function DockOverlay({
 	// The same measure owns the QUESTION/PROBLEM HEIGHT CAP (owner round,
 	// 2026-10-05): the old fixed fractions (55dvh / 40vh) cut long problems
 	// off absurdly short — the cap is now the AVAILABLE COLUMN (the
-	// scroller already starts below the top bar) minus a 2rem breathing
-	// gap, carried as --dock-max-h for the docks' scroll areas.
+	// scroller already starts below the top bar) minus the dock chrome
+	// reserve (calculateDockMaxH: confidence slider, thinking form, stats
+	// bar, and breathing gap), carried as --dock-max-h for the docks'
+	// scroll areas.
 	const [sbInset, setSbInset] = useState(0);
 	const [dockMaxH, setDockMaxH] = useState<number | null>(null);
 	useEffect(() => {
@@ -2026,7 +2029,7 @@ function DockOverlay({
 		if (!el) return;
 		const measure = () => {
 			setSbInset(Math.round((el.offsetWidth - el.clientWidth) / 2));
-			setDockMaxH(Math.max(el.clientHeight - 32, 160));
+			setDockMaxH(calculateDockMaxH(el.clientHeight));
 		};
 		measure();
 		window.addEventListener("resize", measure);
