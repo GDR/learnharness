@@ -224,13 +224,14 @@ describe("Milestone A Slice 2: Store Factories, ProjectContext & Project-Keyed A
 
 			const docA: SourceDocument = {
 				id: "doc_1",
+				sourceId: sourceA.id,
 				vaultId: "vault_main",
 				currentPath: "physics/motion.md",
 				contentHash: "hash123abc",
 				revisionId: "rev1",
 				status: "active",
 			};
-			await ctxA.sources.upsertDocument({ ...docA, sourceId: sourceA.id } as SourceDocument);
+			await ctxA.sources.upsertDocument(docA);
 
 			const sourcesA = await ctxA.sources.listSources(projA.id);
 			const sourcesB = await ctxB.sources.listSources(projB.id);
@@ -418,13 +419,14 @@ describe("Milestone A Slice 2: Store Factories, ProjectContext & Project-Keyed A
 
 			const doc: SourceDocument = {
 				id: "doc_1",
+				sourceId: source.id,
 				vaultId: "vault_1",
 				currentPath: "notes/intro.md",
 				contentHash: "sha256_intro",
 				revisionId: "rev_1",
 				status: "active",
 			};
-			await store.upsertDocument({ ...doc, sourceId: source.id } as SourceDocument);
+			await store.upsertDocument(doc);
 			assert.equal((await store.listDocuments(source.id)).length, 1);
 
 			await store.removeSource(source.id);

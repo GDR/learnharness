@@ -31,7 +31,7 @@ import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts"
 import { failedOutputCallIds, type LhMessage } from "../../core/native-messages.ts";
 import { auditorGraphTools } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
-import { getProjectAuditLock } from "../../server/projects.ts";
+import { getProjectAuditLock } from "../../core/audit-lock.ts";
 import { DEFAULT_PROJECT_ID, type ProjectId } from "../../core/contracts/project.ts";
 
 /**

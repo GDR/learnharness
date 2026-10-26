@@ -123,6 +123,7 @@ describe("Project Domain Contracts & Zod Schemas", () => {
 	it("validates SourceDocument schema", () => {
 		const validDoc: SourceDocument = {
 			id: "doc_schrodinger",
+			sourceId: "src_001",
 			vaultId: "vault_main",
 			currentPath: "Physics/Quantum/Schrodinger.md",
 			contentHash: "sha256:abc123def456",

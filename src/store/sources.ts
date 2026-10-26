@@ -20,9 +20,7 @@ import {
 } from "../core/contracts/project.ts";
 import { writeAtomicJson } from "../core/fs-atomic.ts";
 
-interface StoredDocument extends SourceDocument {
-	sourceId?: SourceId;
-}
+type StoredDocument = SourceDocument;
 
 export function createSourceStore(sourcesDir: string): SourceStore {
 	const resolvedSourcesDir = path.resolve(sourcesDir);
@@ -149,7 +147,7 @@ export function createSourceStore(sourcesDir: string): SourceStore {
 		return Object.values(docs).filter((d) => d.sourceId === sourceId);
 	}
 
-	async function upsertDocument(doc: SourceDocument & { sourceId?: SourceId }): Promise<void> {
+	async function upsertDocument(doc: SourceDocument): Promise<void> {
 		return withLock(async () => {
 			sourceDocumentSchema.parse(doc);
 			const docs = await readDocumentsRecord();

@@ -65,6 +65,7 @@ export interface ProjectSource {
 
 export interface SourceDocument {
   id: DocumentId;
+  sourceId: SourceId;
   vaultId: VaultId;
   currentPath: string;
   contentHash: string;
@@ -772,6 +773,7 @@ export class TestHarness {
             const docId = `doc_${crypto.createHash("md5").update(relPath).digest("hex").slice(0, 12)}`;
             docs.push({
               id: docId,
+              sourceId: source.id,
               vaultId: source.vaultId,
               currentPath: relPath,
               contentHash,

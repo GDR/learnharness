@@ -511,6 +511,7 @@ describe("Tier 1 Feature Coverage: LearnHarness E2E Test Suite", () => {
     it("T1.5.6: document status validation for active, missing, and excluded documents", () => {
       const activeDoc = {
         id: "doc_01",
+        sourceId: "src_01",
         vaultId: "vault_01",
         currentPath: "Physics/Quantum/Schrodinger.md",
         contentHash: "hash123",
