@@ -43,7 +43,7 @@ test("rows name each vendor runtime and start disconnected", async () => {
 	serve({});
 	await mount();
 	const rows = [...document.querySelectorAll('[data-testid$="-connection"]')].map((row) => row.textContent);
-	assert.deepEqual(rows, ["Claude (Claude Code)Connect", "Antigravity (Antigravity ACP server)Connect"]);
+	assert.deepEqual(rows, ["Claude (Claude Code)Connect", "Antigravity (Antigravity CLI)Connect"]);
 });
 
 test("Claude: the dialog discloses the data flow, shows the CLI's own account, and the toggle enables it", async () => {
@@ -73,14 +73,12 @@ test("Claude: a non-subscription sign-in is called out", async () => {
 	assert(dialog().querySelector('[data-testid="local-agent-billing-warning"]'));
 });
 
-test("Antigravity: sign-in is delegated to the ACP server and shows progress", async () => {
-	const { posts } = serve({ antigravity: { installed: true, signedIn: false } });
+test("Antigravity: when signed out, sign-in stays in the terminal — the app offers no login", async () => {
+	serve({ antigravity: { installed: true, signedIn: false } });
 	await mount();
 	await click(button("Connect", document.querySelector('[data-testid="antigravity-connection"]')!));
-	await click(button("Sign in with Google", dialog()));
-	assert.deepEqual(posts.at(-1), ["antigravity", { action: "signIn" }]);
-	assert.match(dialog().textContent ?? "", /Finish signing in with Google in your browser/);
-	assert(button("Cancel sign-in", dialog()));
+	assert.match(dialog().textContent ?? "", /Run agy in a terminal, then Refresh\./);
+	assert(![...dialog().querySelectorAll("button")].some((b) => /sign in/i.test(b.textContent ?? "")));
 });
 
 test("a missing runtime links to its official install page", async () => {

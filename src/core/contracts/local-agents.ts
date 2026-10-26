@@ -23,7 +23,14 @@ export interface LocalAgentDescriptor {
 
 export const LOCAL_AGENTS: readonly LocalAgentDescriptor[] = [
 	{ providerId: "claude-code", label: "Claude", vendor: "Anthropic", runtime: "Claude Code", installUrl: "https://code.claude.com/docs/en/setup", signInCommand: "claude auth login" },
-	{ providerId: "antigravity", label: "Antigravity", vendor: "Google", runtime: "Antigravity ACP server", installUrl: "https://antigravity.google/docs/ide/extensions" },
+	{
+		providerId: "antigravity",
+		label: "Antigravity",
+		vendor: "Google",
+		runtime: "Antigravity CLI",
+		installUrl: "https://antigravity.google/docs/cli",
+		signInCommand: "agy",
+	},
 ];
 
 export function localAgentDescriptor(providerId: string | undefined): LocalAgentDescriptor | undefined {
