@@ -26,6 +26,17 @@ import type {
 	TurnUsage,
 	NotesSource,
 } from "./contracts.ts";
+import type {
+	ProjectId,
+	Project,
+	VaultId,
+	Vault,
+	VaultBinding,
+	SourceId,
+	ProjectSource,
+	DocumentId,
+	SourceDocument,
+} from "./contracts/project.ts";
 import type { UserSettings } from "./settings.ts";
 import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/local-agents.ts";
 
@@ -236,3 +247,72 @@ export interface LocalAgentPreferenceStore {
 	read(): Partial<Record<LocalAgentProviderId, LocalAgentPreferences>>;
 	write(providerId: LocalAgentProviderId, preferences: LocalAgentPreferences): void;
 }
+
+// ─── ProjectStore — global projects registry & project metadata ─────────────
+
+export interface ProjectStore {
+	listProjects(): Promise<Project[]>;
+	getProject(id: ProjectId): Promise<Project | null>;
+	createProject(input: {
+		name: string;
+		description?: string;
+		settings?: Partial<Project["settings"]>;
+		id?: ProjectId;
+	}): Promise<Project>;
+	updateProject(id: ProjectId, patch: Partial<Omit<Project, "id" | "createdAt">>): Promise<Project>;
+	archiveProject(id: ProjectId): Promise<void>;
+	deleteProject(id: ProjectId): Promise<boolean>;
+	getActiveProjectId(): Promise<ProjectId | null>;
+	setActiveProjectId(id: ProjectId): Promise<void>;
+}
+
+// ─── VaultRegistry — globally registered Obsidian vaults across devices ───────
+
+export interface VaultRegistry {
+	listVaults(): Promise<Vault[]>;
+	getVault(id: VaultId): Promise<Vault | null>;
+	registerVault(vault: Omit<Vault, "id">): Promise<Vault>;
+	updateBinding(vaultId: VaultId, binding: VaultBinding): Promise<Vault>;
+	deleteVault?(id: VaultId): Promise<boolean>;
+}
+
+// ─── SourceStore — project-scoped attached sources and documents ─────────────
+
+export interface SourceStore {
+	listSources(projectId: ProjectId): Promise<ProjectSource[]>;
+	getSource(id: SourceId): Promise<ProjectSource | null>;
+	addSource(source: Omit<ProjectSource, "id" | "createdAt">): Promise<ProjectSource>;
+	updateSource(id: SourceId, patch: Partial<Omit<ProjectSource, "id" | "projectId" | "createdAt">>): Promise<ProjectSource>;
+	removeSource(id: SourceId): Promise<void>;
+	listDocuments(sourceId: SourceId): Promise<SourceDocument[]>;
+	upsertDocument(doc: SourceDocument): Promise<void>;
+}
+
+// ─── PracticeStore & ProblemSet — problem sets and problem snapshots ─────────
+
+export interface ProblemSet {
+	id: string;
+	projectId: ProjectId;
+	title: string;
+	createdAt: string;
+	updatedAt: string;
+	nodeIds: string[];
+	propositions: Record<string, { name: string; statement: string }>;
+	chains: GraphChain[];
+	status: "active" | "completed" | "archived";
+}
+
+export interface PracticeStore {
+	createProblemSet(init: {
+		projectId: ProjectId;
+		title: string;
+		nodeIds: string[];
+		propositions: Record<string, { name: string; statement: string }>;
+		chains: GraphChain[];
+	}): Promise<ProblemSet>;
+	getProblemSet(id: string): Promise<ProblemSet | null>;
+	listProblemSets(projectId?: ProjectId): Promise<ProblemSet[]>;
+	updateProblemSet(id: string, patch: Partial<ProblemSet>): Promise<ProblemSet | null>;
+	deleteProblemSet(id: string): Promise<boolean>;
+}
+
