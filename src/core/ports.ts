@@ -29,6 +29,7 @@ import type {
 import type {
 	ProjectId,
 	Project,
+	ProjectSettings,
 	VaultId,
 	Vault,
 	VaultBinding,
@@ -252,6 +253,10 @@ export interface LocalAgentPreferenceStore {
 
 // ─── ProjectStore — global projects registry & project metadata ─────────────
 
+export type ProjectPatch = Partial<Omit<Project, "id" | "createdAt" | "settings">> & {
+	settings?: Partial<ProjectSettings>;
+};
+
 export interface ProjectStore {
 	listProjects(): Promise<Project[]>;
 	getProject(id: ProjectId): Promise<Project | null>;
@@ -261,7 +266,7 @@ export interface ProjectStore {
 		settings?: Partial<Project["settings"]>;
 		id?: ProjectId;
 	}): Promise<Project>;
-	updateProject(id: ProjectId, patch: Partial<Omit<Project, "id" | "createdAt">>): Promise<Project>;
+	updateProject(id: ProjectId, patch: ProjectPatch): Promise<Project>;
 	archiveProject(id: ProjectId): Promise<void>;
 	deleteProject(id: ProjectId): Promise<boolean>;
 	getActiveProjectId(): Promise<ProjectId | null>;

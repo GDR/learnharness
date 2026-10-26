@@ -18,7 +18,7 @@ import {
 	projectIdRegex,
 	projectSchema,
 } from "../core/contracts/project.ts";
-import type { ProjectStore } from "../core/ports.ts";
+import type { ProjectStore, ProjectPatch } from "../core/ports.ts";
 import { writeAtomicJson } from "../core/fs-atomic.ts";
 
 interface GlobalProjectsRecord {
@@ -222,7 +222,7 @@ export function createProjectStore(customDataDir?: string): ProjectStore {
 
 	async function updateProject(
 		id: ProjectId,
-		patch: Partial<Omit<Project, "id" | "createdAt">>,
+		patch: ProjectPatch,
 	): Promise<Project> {
 		return withLock(async () => {
 			const existing = await getProject(id);
