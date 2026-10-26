@@ -17,10 +17,48 @@ import {
 	type SourceDocument,
 	projectSourceSchema,
 	sourceDocumentSchema,
+	validateSourceId,
+	SourceNotFoundError,
+	DEFAULT_SOURCE_EXCLUDE,
+	DEFAULT_SOURCE_INCLUDE,
 } from "../core/contracts/project.ts";
 import { writeAtomicJson } from "../core/fs-atomic.ts";
 
 type StoredDocument = SourceDocument;
+
+/**
+ * Normalizes a single glob pattern:
+ * - Trims leading and trailing whitespace
+ * - Converts Windows-style backslashes to forward slashes
+ * - Collapses consecutive forward slashes into a single slash (e.g. `docs//**` -> `docs/**`)
+ */
+export function normalizeGlob(pattern: string): string {
+	if (typeof pattern !== "string") return "";
+	return pattern.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
+}
+
+/**
+ * Normalizes an array of glob patterns, trimming, collapsing slashes,
+ * and filtering out any empty strings.
+ */
+export function normalizeGlobs(patterns: readonly string[]): string[] {
+	if (!Array.isArray(patterns)) return [];
+	return patterns
+		.map(normalizeGlob)
+		.filter((p) => p.length > 0);
+}
+
+export type AddSourceInput = {
+	projectId: ProjectId;
+	vaultId: string;
+	include?: string[];
+	exclude?: string[];
+	recursive?: boolean;
+	enabled?: boolean;
+	syncMode?: "manual" | "automatic";
+	deletionPolicy?: "deactivate" | "retain";
+	id?: SourceId;
+};
 
 export function createSourceStore(sourcesDir: string): SourceStore {
 	const resolvedSourcesDir = path.resolve(sourcesDir);
@@ -76,14 +114,29 @@ export function createSourceStore(sourcesDir: string): SourceStore {
 		return sources[id] ?? null;
 	}
 
-	async function addSource(source: Omit<ProjectSource, "id" | "createdAt">): Promise<ProjectSource> {
+	async function addSource(source: AddSourceInput): Promise<ProjectSource> {
 		return withLock(async () => {
 			const sources = await readSourcesRecord();
 			const now = new Date().toISOString();
-			const id: SourceId = `src_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+			const id: SourceId = source.id
+				? validateSourceId(source.id)
+				: `src_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+
+			const rawInclude = source.include ? normalizeGlobs(source.include) : [];
+			const rawExclude = source.exclude ? normalizeGlobs(source.exclude) : [];
+			const include = rawInclude.length > 0 ? rawInclude : [...DEFAULT_SOURCE_INCLUDE];
+			const exclude = rawExclude.length > 0 ? rawExclude : [...DEFAULT_SOURCE_EXCLUDE];
+
 			const newSource: ProjectSource = {
-				...source,
 				id,
+				projectId: source.projectId,
+				vaultId: source.vaultId,
+				include,
+				exclude,
+				recursive: source.recursive ?? true,
+				enabled: source.enabled ?? true,
+				syncMode: source.syncMode ?? "manual",
+				deletionPolicy: source.deletionPolicy ?? "deactivate",
 				createdAt: now,
 			};
 
@@ -102,12 +155,26 @@ export function createSourceStore(sourcesDir: string): SourceStore {
 			const sources = await readSourcesRecord();
 			const existing = sources[id];
 			if (!existing) {
-				throw new Error(`Source not found: ${id}`);
+				throw new SourceNotFoundError(id);
+			}
+
+			let include = existing.include;
+			if (patch.include !== undefined) {
+				const normalized = normalizeGlobs(patch.include);
+				include = normalized.length > 0 ? normalized : [...DEFAULT_SOURCE_INCLUDE];
+			}
+
+			let exclude = existing.exclude;
+			if (patch.exclude !== undefined) {
+				const normalized = normalizeGlobs(patch.exclude);
+				exclude = normalized.length > 0 ? normalized : [...DEFAULT_SOURCE_EXCLUDE];
 			}
 
 			const updated: ProjectSource = {
 				...existing,
 				...patch,
+				include,
+				exclude,
 				id: existing.id,
 				projectId: existing.projectId,
 				createdAt: existing.createdAt,

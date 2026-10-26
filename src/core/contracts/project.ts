@@ -67,7 +67,53 @@ export function validateVaultId(raw: unknown): VaultId {
 	return result.data;
 }
 
-export const sourceIdSchema = z.string().min(1, "sourceId cannot be empty");
+export const sourceIdRegex = /^[A-Za-z0-9_-]+$/;
+
+export const sourceIdSchema = z
+	.string()
+	.min(1, "sourceId cannot be empty")
+	.regex(sourceIdRegex, "sourceId must contain only letters, numbers, underscores, and hyphens");
+
+export class InvalidSourceIdError extends Error {
+	readonly status = 400;
+	constructor(message = "Invalid sourceId") {
+		super(message);
+		this.name = "InvalidSourceIdError";
+	}
+}
+
+export class SourceNotFoundError extends Error {
+	readonly status = 404;
+	readonly sourceId: string;
+	constructor(sourceId: string) {
+		super(`Source not found: ${sourceId}`);
+		this.name = "SourceNotFoundError";
+		this.sourceId = sourceId;
+	}
+}
+
+export function validateSourceId(raw: unknown): SourceId {
+	if (typeof raw !== "string" || !raw.trim()) {
+		throw new InvalidSourceIdError("sourceId must be a non-empty string");
+	}
+	const result = sourceIdSchema.safeParse(raw.trim());
+	if (!result.success) {
+		throw new InvalidSourceIdError(
+			result.error.issues[0]?.message ?? `Invalid sourceId format: "${String(raw)}"`,
+		);
+	}
+	return result.data;
+}
+
+export const DEFAULT_SOURCE_EXCLUDE: readonly string[] = [
+	".obsidian/**",
+	".trash/**",
+	".git/**",
+	"node_modules/**",
+];
+
+export const DEFAULT_SOURCE_INCLUDE: readonly string[] = ["**/*.md"];
+
 export const documentIdSchema = z.string().min(1, "documentId cannot be empty");
 export const evidenceIdSchema = z.string().min(1, "evidenceId cannot be empty");
 
@@ -183,6 +229,18 @@ export const projectSourceSchema = z.object({
 	deletionPolicy: z.enum(["deactivate", "retain"]),
 	createdAt: z.string().min(1, "createdAt cannot be empty"),
 });
+
+export const projectSourcePatchSchema = z.object({
+	include: z.array(z.string()).optional(),
+	exclude: z.array(z.string()).optional(),
+	recursive: z.boolean().optional(),
+	enabled: z.boolean().optional(),
+	syncMode: z.enum(["manual", "automatic"]).optional(),
+	deletionPolicy: z.enum(["deactivate", "retain"]).optional(),
+});
+
+export type ProjectSourcePatch = z.infer<typeof projectSourcePatchSchema>;
+
 
 export interface AttachedSourceScope {
 	rootPath: string;
