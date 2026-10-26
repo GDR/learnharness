@@ -1014,7 +1014,7 @@ describe("tool + renderer registry wiring", () => {
 		// sources v0 — pdf maps to its dispatch card (the live-smoke gap)
 		assert.equal(artifactRenderers.pdf, PdfJobCard);
 		// sources v1 — the learner-filesystem set maps to the generic tool-call card
-		for (const t of ["read", "ls", "find", "grep"]) {
+		for (const t of ["read", "ls", "find", "grep", "write", "edit"]) {
 			assert.equal(artifactRenderers[t], ToolCallCard, `${t} renders the tool-call card`);
 		}
 		// wave 7 — the prober's graph tools join the SAME discipline (they

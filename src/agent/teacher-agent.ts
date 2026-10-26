@@ -128,6 +128,8 @@ export interface AgentBuildOptions {
 	 *  <chatId>.jsonl via providerEventObserver — the GLM-truncation /
 	 *  DeepSeek-id incident layer. Absent or env-off → no observer. */
 	chatId?: string;
+	/** Configured Obsidian project folders for scoped Markdown write/edit tools. */
+	obsidianFolders?: readonly string[];
 }
 
 /**
@@ -272,7 +274,8 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
  * handler keys teacher construction on.
  */
 export function createProberAgent(ctx: ProberToolContext, opts: AgentBuildOptions = {}) {
-	return baseAgentOptions("prober", opts, Object.values(createProberTools(ctx, opts.toolToggles)));
+	const effectiveCtx = ctx.obsidianFolders ? ctx : { ...ctx, obsidianFolders: opts.obsidianFolders };
+	return baseAgentOptions("prober", opts, Object.values(createProberTools(effectiveCtx, opts.toolToggles)));
 }
 
 /**
@@ -288,7 +291,8 @@ export function createTeacherAgent(
 	ctx?: TeacherToolContext,
 	opts: AgentBuildOptions = {},
 ) {
-	const tools = opts.tools ?? (ctx ? createTeacherTools(ctx, opts.toolToggles) : bareQuestionTools());
+	const effectiveCtx = ctx ? (ctx.obsidianFolders ? ctx : { ...ctx, obsidianFolders: opts.obsidianFolders }) : undefined;
+	const tools = opts.tools ?? (effectiveCtx ? createTeacherTools(effectiveCtx, opts.toolToggles) : bareQuestionTools());
 	return baseAgentOptions("teacher", opts, Object.values(tools));
 }
 
@@ -332,7 +336,8 @@ export function bareQuestionTools(): Record<string, AgentTool<any>> {
  * for a mixed batch (for example, send_to_user + problem).
  */
 export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOptions = {}) {
-	const tools = opts.tools ?? practiceTools(ctx);
+	const effectiveCtx = ctx.obsidianFolders ? ctx : { ...ctx, obsidianFolders: opts.obsidianFolders };
+	const tools = opts.tools ?? practiceTools(effectiveCtx);
 	return baseAgentOptions("practice", opts, Object.values(tools));
 }
 

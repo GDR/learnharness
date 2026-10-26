@@ -21,6 +21,8 @@ import { readTool } from "./read.ts";
 import { lsTool } from "./ls.ts";
 import { findTool } from "./find.ts";
 import { grepTool } from "./grep.ts";
+import { writeTool } from "./write.ts";
+import { editTool } from "./edit.ts";
 import { jobTools, type JobToolContext } from "./jobs.ts";
 import { proberGraphTools, type GraphToolContext } from "./graph.ts";
 import { activeProblemOf } from "../../core/native-messages.ts";
@@ -44,6 +46,8 @@ export interface PracticeToolContext {
 	 *  Each absent context (tests) = absent from the registry. */
 	graph?: GraphToolContext;
 	jobs?: JobToolContext;
+	/** Configured Obsidian project folders for scoped Markdown write/edit tools. */
+	obsidianFolders?: readonly string[];
 }
 
 /** TURN-SCOPED GATE STATE (the BKT incident, 2026-10-05): the gates used
@@ -242,6 +246,8 @@ export function practiceTools(ctx: PracticeToolContext): Record<string, AgentToo
 		ls: lsTool,
 		find: findTool,
 		grep: grepTool,
+		write: writeTool(ctx.obsidianFolders ?? []),
+		edit: editTool(ctx.obsidianFolders ?? []),
 		...(jobs?.research ? { research: jobs.research } : {}),
 		...(jobs ? { pdf: jobs.pdf! } : {}),
 		...(ctx.graph ? proberGraphTools(ctx.graph) : {}),
