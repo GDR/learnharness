@@ -23,7 +23,7 @@
 
             src = pkgs.fetchurl {
               url = "https://github.com/GDR/learnharness/releases/download/v${version}/LearnHarness-${version}-arm64-mac.zip";
-              hash = "sha256-5OXGcmSqRo8YGySiw0uLWTyOt8VKhPtj6yJcUp4AyN0=";
+              hash = "sha256-2yE01hPf0h56dyZO9Z3o9Ak1qPN+qXqnGt4eC+olXIY=";
             };
 
             nativeBuildInputs = [
