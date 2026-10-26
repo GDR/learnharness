@@ -31,6 +31,8 @@ import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts"
 import { failedOutputCallIds, type LhMessage } from "../../core/native-messages.ts";
 import { auditorGraphTools } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
+import { getProjectAuditLock } from "../../server/projects.ts";
+import { DEFAULT_PROJECT_ID, type ProjectId } from "../../core/contracts/project.ts";
 
 /**
  * The extraction pipeline (vision §1 construction, 2026-09-02 redesign;
@@ -729,6 +731,7 @@ export interface ExtractionModels {
 }
 
 export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
+	projectId?: ProjectId;
 	/** The chunk budget — the transcript-token share of the extractor's
 	 *  context; batches fill to it (the trigger fires on the same number,
 	 *  read fresh per turn by the composition root). OPTIONAL with the
@@ -881,13 +884,16 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  abort-aware on both sides of the queue (a waiter that aborts
 	 *  leaves without auditing — its chain link still resolves, so
 	 *  successors never hang). */
-	async function withAuditLock<T>(jobKey: string, kind: "chat" | "notes", label: string | undefined, critical: () => Promise<T>): Promise<T> {
+	async function withAuditLock<T>(
+		jobKey: string,
+		kind: "chat" | "notes",
+		label: string | undefined,
+		critical: () => Promise<T>,
+		projectId?: ProjectId,
+	): Promise<T> {
 		setPhase(jobKey, "waiting", kind, label);
-		const g = globalThis as typeof globalThis & LhExtractionGlobal;
-		const lock = (g.__lhAuditLock ??= { tail: Promise.resolve() });
-		const prev = lock.tail;
-		let release!: () => void;
-		lock.tail = new Promise<void>((resolve) => (release = resolve));
+		const pid = projectId ?? deps.projectId ?? DEFAULT_PROJECT_ID;
+		const lockFn = getProjectAuditLock(pid);
 		const signal = runningExtractions.get(jobKey)?.controller.signal;
 		let onAbort: (() => void) | undefined;
 		const aborted = new Promise<never>((_, reject) => {
@@ -901,12 +907,15 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			else signal.addEventListener("abort", onAbort, { once: true });
 		});
 		try {
-			await Promise.race([prev, aborted]);
-			signal?.throwIfAborted(); // aborted exactly at handoff
-			return await critical();
+			return await Promise.race([
+				lockFn(async () => {
+					signal?.throwIfAborted(); // aborted exactly at handoff
+					return await critical();
+				}),
+				aborted,
+			]);
 		} finally {
 			if (onAbort && signal && !signal.aborted) signal.removeEventListener("abort", onAbort);
-			release();
 		}
 	}
 
@@ -1171,8 +1180,12 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 							// graph-mutating critical section — one job at a time,
 							// process-wide, so the auditor explores the graph as it
 							// stands AFTER every earlier job's merge.
-							return withAuditLock(jobKey, "chat", undefined, async () => {
-								setPhase(jobKey, "auditing", "chat", undefined, part);
+							return withAuditLock(
+								jobKey,
+								"chat",
+								undefined,
+								async () => {
+									setPhase(jobKey, "auditing", "chat", undefined, part);
 								const auditResult = await audit(jobKey, chatId, findings);
 								setPhase(jobKey, "merging", "chat", undefined, part);
 								// SESSION-DELETION GUARD (wave 6): a chat deleted mid-run must never
@@ -1203,7 +1216,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 									`[extraction ${jobKey}] merged: ${batchStats.nodes} nodes, ${batchStats.chains ?? 0} chains`,
 								);
 								return batchStats;
-							});
+							},
+							deps.projectId,
+						);
 						}),
 					});
 				} catch (err) {
@@ -1371,7 +1386,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								settleGraphLayout(graphStore);
 								console.info(`[extraction ${jobKey}] merged: ${merged.nodes} nodes, ${merged.chains ?? 0} chains`);
 								return merged;
-							});
+							},
+							(input as { projectId?: ProjectId }).projectId ?? deps.projectId,
+						);
 						}),
 					});
 				} catch (err) {
