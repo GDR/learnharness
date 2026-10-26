@@ -82,3 +82,5 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// Project validation and audit lock (Milestone A). Pure, browser-safe.
+export * from "./audit-lock.ts";

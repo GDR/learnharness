@@ -27,7 +27,7 @@ import { createJobStore } from "../store/jobs.ts";
 import { createPracticeStore } from "../store/practice.ts";
 import { createSourceStore } from "../store/sources.ts";
 
-export { InvalidProjectIdError, validateProjectId, getProjectAuditLock };
+export { InvalidProjectIdError, validateProjectId, getProjectAuditLock, createProjectStore };
 
 export class ProjectNotFoundError extends Error {
 	readonly status = 404;
