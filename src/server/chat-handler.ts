@@ -32,6 +32,7 @@ import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
+import { resolveActiveProjectEffectiveScopes } from "./projects.ts";
 import { providerKeyPresent } from "./keys.ts";
 import {
 	extractionEnabled,
@@ -410,8 +411,11 @@ export async function handleChatInput(
 	// problem + conclude. buildAgent stays honored (the test seam is
 	// uniform across kinds).
 	const obsidianFolders = effective.agent?.obsidianFolders ?? [];
+	const attachedSources = await resolveActiveProjectEffectiveScopes({
+		obsidianFolders,
+	});
 	const constructed: TeachingAgent = buildAgent
-		? buildAgent({ ...agentOpts, teaching })
+		? buildAgent({ ...agentOpts, teaching, attachedSources })
 		: record.kind === "practice"
 			? createPracticeAgent(
 					{
@@ -433,6 +437,7 @@ export async function handleChatInput(
 							searchAvailable,
 						},
 						obsidianFolders,
+						attachedSources,
 						...(graphToolsEnabled(effective) ? { graph: { chatStore: stores.chatStore, graphStore: stores.graphStore } } : {}),
 					},
 					agentOpts,
@@ -448,6 +453,7 @@ export async function handleChatInput(
 						// = no research tool in the teacher's registry.
 						searchAvailable,
 						obsidianFolders,
+						attachedSources,
 					},
 					agentOpts,
 				)
@@ -463,6 +469,7 @@ export async function handleChatInput(
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
 						searchAvailable,
 						obsidianFolders,
+						attachedSources,
 						// The map reader (wave 7): the prober reads the learner's
 						// knowledge graph through tools when the gate opens —
 						// graph master switch AND the agent.graphTools toggle.

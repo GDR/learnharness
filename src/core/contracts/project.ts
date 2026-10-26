@@ -147,6 +147,28 @@ export const projectSourceSchema = z.object({
 	createdAt: z.string().min(1, "createdAt cannot be empty"),
 });
 
+export interface AttachedSourceScope {
+	rootPath: string;
+	include?: string[];
+	exclude?: string[];
+	recursive?: boolean;
+	enabled?: boolean;
+	sourceId?: SourceId;
+	vaultId?: VaultId;
+	projectId?: ProjectId;
+}
+
+export const attachedSourceScopeSchema = z.object({
+	rootPath: z.string().min(1, "rootPath cannot be empty"),
+	include: z.array(z.string()).optional(),
+	exclude: z.array(z.string()).optional(),
+	recursive: z.boolean().optional(),
+	enabled: z.boolean().optional(),
+	sourceId: sourceIdSchema.optional(),
+	vaultId: vaultIdSchema.optional(),
+	projectId: projectIdSchema.optional(),
+});
+
 export interface SourceDocument {
 	id: DocumentId;
 	sourceId: SourceId;
