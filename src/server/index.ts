@@ -50,5 +50,8 @@ export { sessionCost } from "./pricing.ts";
 // Multi-project workspace isolation & Obsidian integration (Milestones A & B).
 export * from "./projects.ts";
 export * from "./vaults.ts";
+export * from "./sources.ts";
 export { createVaultRegistry, getVaultRegistry, setVaultRegistry } from "../store/vaults.ts";
+export { createSourceStore } from "../store/sources.ts";
 export { runLegacyMigration } from "./migration/legacy-migration.ts";
+
