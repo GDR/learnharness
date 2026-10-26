@@ -36,7 +36,9 @@ import type {
 	ProjectSource,
 	DocumentId,
 	SourceDocument,
+	MigrationCheckpoint,
 } from "./contracts/project.ts";
+export type { MigrationCheckpoint };
 import type { UserSettings } from "./settings.ts";
 import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/local-agents.ts";
 
@@ -271,7 +273,7 @@ export interface ProjectStore {
 export interface VaultRegistry {
 	listVaults(): Promise<Vault[]>;
 	getVault(id: VaultId): Promise<Vault | null>;
-	registerVault(vault: Omit<Vault, "id">): Promise<Vault>;
+	registerVault(vault: Omit<Vault, "id"> & { id?: VaultId }): Promise<Vault>;
 	updateBinding(vaultId: VaultId, binding: VaultBinding): Promise<Vault>;
 	deleteVault?(id: VaultId): Promise<boolean>;
 }

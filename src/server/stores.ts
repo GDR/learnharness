@@ -18,6 +18,7 @@ import { jobStore } from "../store/jobs.ts";
 import { createPracticeStore } from "../store/practice.ts";
 import { createSourceStore } from "../store/sources.ts";
 import { getProjectStore, resolveProjectContext } from "./projects.ts";
+import { runLegacyMigration } from "./migration/legacy-migration.ts";
 import type { PracticeStore, SourceStore } from "../core/ports.ts";
 
 const defaultProjectDir = path.join(PATHS.data, "projects", DEFAULT_PROJECT_ID);
@@ -31,6 +32,7 @@ let defaultProjectContext: ProjectContext | null = null;
  */
 export const defaultProjectContextPromise: Promise<ProjectContext> = (async () => {
 	try {
+		await runLegacyMigration();
 		const pStore = getProjectStore();
 		const existing = await pStore.getProject(DEFAULT_PROJECT_ID);
 		if (!existing) {
