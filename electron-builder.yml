@@ -135,7 +135,7 @@ mac:
   # via the LH_NOTARY keychain profile, env baked into desktop:dist).
   # Adds minutes per build (Apple's scan queue). Verification battery:
   # codesign --verify --deep / spctl --assess / stapler validate.
-  notarize: true
+  notarize: false
 dmg:
   title: "${productName} ${version}"
   # Owner artwork: 540×380 at 1×; the sibling background@2x.png is
@@ -188,7 +188,7 @@ publish:
   # would be a leak. desktop:dist passes no --publish flag, so builds never
   # upload; publishing happens at release time (GH_TOKEN + --publish).
   - provider: github
-    owner: amosblomqvist
+    owner: GDR
     repo: learnharness
     # All three CI jobs contribute assets; only the owner publishes it.
     releaseType: draft

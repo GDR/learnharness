@@ -142,13 +142,18 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            if [[ -z "${!name}" ]]; then
-              echo "::error::Missing signing/notarization secret: $name"
-              exit 1
-            fi
-          done
-      - name: Signed and notarized macOS release → draft
+          echo "Repository: ${{ github.repository }}"
+          if [[ -n "$CSC_LINK" ]]; then
+            echo "::notice::MAC_CSC_LINK is provided; code signing enabled."
+          else
+            echo "::notice::MAC_CSC_LINK is absent; will build unsigned macOS release."
+          fi
+          if [[ -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+            echo "::notice::Apple notary secrets are provided; notarization enabled."
+          else
+            echo "::notice::Apple notary secrets are absent; skipping notarization."
+          fi
+      - name: Packaged macOS release → draft
         if: github.event_name == 'push' && runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -157,7 +162,17 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder ${{ matrix.builder_args }} --publish always -c.forceCodeSigning=true
+        run: |
+          extra_args=()
+          if [[ -z "${CSC_LINK:-}" ]]; then
+            export CSC_IDENTITY_AUTO_DISCOVERY="false"
+          else
+            extra_args+=("-c.forceCodeSigning=true")
+          fi
+          if [[ -z "${APPLE_ID:-}" || -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" || -z "${APPLE_TEAM_ID:-}" ]]; then
+            extra_args+=("-c.mac.notarize=false")
+          fi
+          npx electron-builder ${{ matrix.builder_args }} --publish always "${extra_args[@]}"
       - name: Windows/Linux release → draft
         if: github.event_name == 'push' && runner.os != 'macOS'
         env:
