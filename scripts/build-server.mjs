@@ -89,4 +89,12 @@ for (const asset of [
 	}
 }
 
+// 4) Patch standalone @earendil-works/pi-ai with native Antigravity provider
+const standalonePiAi = path.join(STANDALONE, "node_modules", "@earendil-works", "pi-ai");
+const patchScript = path.join(ROOT, "scripts", "patch-pi-ai.mjs");
+if (exists(standalonePiAi) && exists(patchScript)) {
+	const { patchPiAi } = await import("./patch-pi-ai.mjs");
+	patchPiAi(standalonePiAi);
+}
+
 console.log("[build-server] server payload ready:", STANDALONE);
