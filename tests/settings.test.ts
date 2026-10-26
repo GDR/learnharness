@@ -204,6 +204,32 @@ describe("sanitizeUserSettings", () => {
 		assert.deepEqual(out.agent?.tools, { quiz: false, demo: true });
 	});
 
+	it("obsidianFolders: valid strings trimmed and deduplicated, invalid dropped, non-array dropped", () => {
+		const valid = sanitizeUserSettings({
+			version: 1,
+			agent: { obsidianFolders: [" /Users/test/vault ", "/Users/test/vault", "/Users/test/notes"] },
+		});
+		assert.deepEqual(valid?.agent?.obsidianFolders, ["/Users/test/vault", "/Users/test/notes"]);
+
+		const filtered = sanitizeUserSettings({
+			version: 1,
+			agent: { obsidianFolders: ["/valid", 123, "   ", null, "", { path: "/bad" }] },
+		});
+		assert.deepEqual(filtered?.agent?.obsidianFolders, ["/valid"]);
+
+		const empty = sanitizeUserSettings({
+			version: 1,
+			agent: { obsidianFolders: [] },
+		});
+		assert.deepEqual(empty?.agent?.obsidianFolders, []);
+
+		const notArray = sanitizeUserSettings({
+			version: 1,
+			agent: { obsidianFolders: "/not/an/array" },
+		});
+		assert.equal(notArray?.agent?.obsidianFolders, undefined);
+	});
+
 	it("BACKGROUND_MODEL_ROLES matches the five background roles (practice trio deleted 2026-10-04)", () => {
 		assert.deepEqual([...BACKGROUND_MODEL_ROLES], [
 			"researcher",

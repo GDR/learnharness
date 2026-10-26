@@ -262,6 +262,8 @@ export interface AgentSettings {
 	 *  route); the switch is explicit so users keep a file on disk but run
 	 *  the source default to compare (owner decision 2026-09-19). */
 	prompts?: Record<string, boolean>;
+	/** Obsidian project/vault directory paths where agent notes tools may operate. */
+	obsidianFolders?: string[];
 }
 
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
@@ -527,6 +529,12 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
+	}
+	if (Array.isArray(raw.obsidianFolders)) {
+		const folders = raw.obsidianFolders
+			.filter((f): f is string => typeof f === "string" && f.trim().length > 0)
+			.map((f) => f.trim());
+		out.obsidianFolders = Array.from(new Set(folders));
 	}
 	return out;
 }

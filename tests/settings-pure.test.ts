@@ -10,11 +10,13 @@ import { describe, it } from "node:test";
 import { appearanceVars, derivedPalette, resolveAppearance, staleVarNames } from "../components/settings/appearance.tsx";
 import {
 	PROMPT_IN_USE_HINT,
+	composeAddObsidianFolder,
 	composePromptSwitch,
+	composeQuizMechanics,
+	composeRemoveObsidianFolder,
 	composeSearchEngine,
 	composeSlotModel,
 	composeTool,
-	composeQuizMechanics,
 	sectionedSegments,
 } from "../components/settings/agent-section.tsx";
 import { nextOverrides } from "../components/settings/keyboard-section.tsx";
@@ -198,6 +200,44 @@ describe("agent section compose helpers — the replace-whole PUT body", () => {
 	it("composePromptSwitch: on = explicit true, off = key REMOVED (absent = off)", () => {
 		assert.deepEqual(composePromptSwitch({ prompts: { a: true } }, "b", true).prompts, { a: true, b: true });
 		assert.deepEqual(composePromptSwitch({ prompts: { a: true, b: true } }, "b", false).prompts, { a: true });
+	});
+
+	it("composeAddObsidianFolder: adds to undefined, trims, deduplicates, and preserves other settings", () => {
+		const created = composeAddObsidianFolder(undefined, " /Users/test/vault ");
+		assert.deepEqual(created.obsidianFolders, ["/Users/test/vault"]);
+
+		const existing: AgentSettings = {
+			tools: { demo: true },
+			obsidianFolders: ["/Users/test/vault"],
+		};
+		const added = composeAddObsidianFolder(existing, "/Users/test/notes");
+		assert.deepEqual(added.obsidianFolders, ["/Users/test/vault", "/Users/test/notes"]);
+		assert.deepEqual(added.tools, { demo: true }, "preserves tools");
+
+		// Duplicate is ignored
+		const dup = composeAddObsidianFolder(added, " /Users/test/vault ");
+		assert.deepEqual(dup.obsidianFolders, ["/Users/test/vault", "/Users/test/notes"]);
+
+		// Empty/whitespace is ignored
+		const empty = composeAddObsidianFolder(added, "   ");
+		assert.deepEqual(empty.obsidianFolders, ["/Users/test/vault", "/Users/test/notes"]);
+	});
+
+	it("composeRemoveObsidianFolder: removes by index or by path, preserves other settings", () => {
+		const initial: AgentSettings = {
+			tools: { demo: true },
+			obsidianFolders: ["/a", "/b", "/c"],
+		};
+		const removedByIndex = composeRemoveObsidianFolder(initial, 1);
+		assert.deepEqual(removedByIndex.obsidianFolders, ["/a", "/c"]);
+		assert.deepEqual(removedByIndex.tools, { demo: true });
+
+		const removedByPath = composeRemoveObsidianFolder(initial, "/a");
+		assert.deepEqual(removedByPath.obsidianFolders, ["/b", "/c"]);
+		assert.deepEqual(removedByPath.tools, { demo: true });
+
+		// On undefined agent
+		assert.deepEqual(composeRemoveObsidianFolder(undefined, 0).obsidianFolders, []);
 	});
 });
 

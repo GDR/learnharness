@@ -90,6 +90,48 @@ describe("parseAgentSettingsBody", () => {
 		assert.equal(parseAgentSettingsBody({ graphTools: null }).ok, false);
 	});
 
+	it("obsidianFolders: validates string array, trims, deduplicates, accepts [], rejects non-arrays/non-strings", () => {
+		const valid = parseAgentSettingsBody({
+			obsidianFolders: [" /Users/test/vault ", "/Users/test/vault", "/Users/test/second"],
+		});
+		assert.ok(valid.ok);
+		assert.deepEqual(valid.settings.obsidianFolders, ["/Users/test/vault", "/Users/test/second"]);
+
+		const empty = parseAgentSettingsBody({ obsidianFolders: [] });
+		assert.ok(empty.ok);
+		assert.deepEqual(empty.settings.obsidianFolders, []);
+
+		const notArray = parseAgentSettingsBody({ obsidianFolders: "not an array" });
+		assert.equal(notArray.ok, false);
+		if (!notArray.ok) {
+			assert.equal(notArray.error, "obsidianFolders must be an array of folder paths");
+		}
+
+		const notArrayObj = parseAgentSettingsBody({ obsidianFolders: { path: "/vault" } });
+		assert.equal(notArrayObj.ok, false);
+		if (!notArrayObj.ok) {
+			assert.equal(notArrayObj.error, "obsidianFolders must be an array of folder paths");
+		}
+
+		const withNumbers = parseAgentSettingsBody({ obsidianFolders: [123] });
+		assert.equal(withNumbers.ok, false);
+		if (!withNumbers.ok) {
+			assert.equal(withNumbers.error, "obsidianFolders entries must be non-empty strings");
+		}
+
+		const withEmpty = parseAgentSettingsBody({ obsidianFolders: ["   "] });
+		assert.equal(withEmpty.ok, false);
+		if (!withEmpty.ok) {
+			assert.equal(withEmpty.error, "obsidianFolders entries must be non-empty strings");
+		}
+
+		const withNull = parseAgentSettingsBody({ obsidianFolders: ["/valid", null] });
+		assert.equal(withNull.ok, false);
+		if (!withNull.ok) {
+			assert.equal(withNull.error, "obsidianFolders entries must be non-empty strings");
+		}
+	});
+
 	it("an empty {} agent section parses to {} (replace-whole clear)", () => {
 		const r = parseAgentSettingsBody({});
 		assert.ok(r.ok);
