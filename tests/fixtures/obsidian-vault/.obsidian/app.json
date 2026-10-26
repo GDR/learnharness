@@ -1,0 +1,8 @@
+{
+  "vaultId": "vault-fixture-test-01",
+  "name": "Obsidian Test Fixture Vault",
+  "legacyEditor": false,
+  "livePreview": true,
+  "theme": "obsidian",
+  "attachmentFolderPath": "assets"
+}
