@@ -3,12 +3,12 @@ import * as path from "node:path";
 import { Type, type Static } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
-import { resolveAndValidateObsidianPath } from "./fs-shared.ts";
+import { resolveAndValidateObsidianPath, type ObsidianToolScopeInput } from "./fs-shared.ts";
 
 export const editInput = Type.Object({
 	path: Type.String({
 		minLength: 1,
-		description: "Path to the Markdown file (.md, .markdown, .mdx) inside a configured Obsidian folder.",
+		description: "Path to the Markdown file (.md, .markdown, .mdx) inside a configured Obsidian folder or attached project source.",
 	}),
 	oldText: Type.String({
 		minLength: 1,
@@ -27,19 +27,19 @@ export const editInput = Type.Object({
 export type EditInput = Static<typeof editInput>;
 
 /**
- * Creates the edit tool scoped to configured Obsidian folders.
+ * Creates the edit tool scoped to configured Obsidian folders or attached project sources.
  * Modifies existing Markdown files (.md, .markdown, .mdx) by performing exact text replacements.
  */
-export function editTool(obsidianFolders: readonly string[] = []): AgentTool<typeof editInput> {
+export function editTool(scope: ObsidianToolScopeInput = []): AgentTool<typeof editInput> {
 	return {
 		name: "edit",
 		label: "edit",
 		description:
-			"Edit an existing Markdown file (.md, .markdown, or .mdx) strictly inside a configured Obsidian folder by replacing exact text. " +
+			"Edit an existing Markdown file (.md, .markdown, or .mdx) strictly inside a configured Obsidian folder or attached project source by replacing exact text. " +
 			"oldText must match verbatim, including indentation and newlines. Fails if oldText is not found or matches multiple times without multiple: true.",
 		parameters: editInput,
 		execute: serverExecute("edit", editInput, async ({ path: rawPath, oldText, newText, multiple }) => {
-			const resolved = await resolveAndValidateObsidianPath(rawPath, obsidianFolders);
+			const resolved = await resolveAndValidateObsidianPath(rawPath, scope);
 			let current: string;
 			try {
 				current = await fs.readFile(resolved, "utf-8");

@@ -22,6 +22,7 @@ import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
+import type { AttachedSourceScope } from "../core/contracts/project.ts";
 
 /**
  * The two teaching-side agents (docs/probe-teach-split.md): the PROBER and
@@ -130,6 +131,8 @@ export interface AgentBuildOptions {
 	chatId?: string;
 	/** Configured Obsidian project folders for scoped Markdown write/edit tools. */
 	obsidianFolders?: readonly string[];
+	/** Configured project attached source scopes for write/edit tools. */
+	attachedSources?: readonly AttachedSourceScope[];
 }
 
 /**
@@ -274,7 +277,10 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
  * handler keys teacher construction on.
  */
 export function createProberAgent(ctx: ProberToolContext, opts: AgentBuildOptions = {}) {
-	const effectiveCtx = ctx.obsidianFolders ? ctx : { ...ctx, obsidianFolders: opts.obsidianFolders };
+	const effectiveCtx =
+		ctx.attachedSources || ctx.obsidianFolders
+			? ctx
+			: { ...ctx, obsidianFolders: opts.obsidianFolders, attachedSources: opts.attachedSources };
 	return baseAgentOptions("prober", opts, Object.values(createProberTools(effectiveCtx, opts.toolToggles)));
 }
 
@@ -291,7 +297,11 @@ export function createTeacherAgent(
 	ctx?: TeacherToolContext,
 	opts: AgentBuildOptions = {},
 ) {
-	const effectiveCtx = ctx ? (ctx.obsidianFolders ? ctx : { ...ctx, obsidianFolders: opts.obsidianFolders }) : undefined;
+	const effectiveCtx = ctx
+		? ctx.attachedSources || ctx.obsidianFolders
+			? ctx
+			: { ...ctx, obsidianFolders: opts.obsidianFolders, attachedSources: opts.attachedSources }
+		: undefined;
 	const tools = opts.tools ?? (effectiveCtx ? createTeacherTools(effectiveCtx, opts.toolToggles) : bareQuestionTools());
 	return baseAgentOptions("teacher", opts, Object.values(tools));
 }
@@ -336,7 +346,10 @@ export function bareQuestionTools(): Record<string, AgentTool<any>> {
  * for a mixed batch (for example, send_to_user + problem).
  */
 export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOptions = {}) {
-	const effectiveCtx = ctx.obsidianFolders ? ctx : { ...ctx, obsidianFolders: opts.obsidianFolders };
+	const effectiveCtx =
+		ctx.attachedSources || ctx.obsidianFolders
+			? ctx
+			: { ...ctx, obsidianFolders: opts.obsidianFolders, attachedSources: opts.attachedSources };
 	const tools = opts.tools ?? practiceTools(effectiveCtx);
 	return baseAgentOptions("practice", opts, Object.values(tools));
 }

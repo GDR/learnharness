@@ -211,21 +211,89 @@ function isInsideFolder(parent: string, child: string): boolean {
 	return !rel.startsWith("..") && !path.isAbsolute(rel) && rel !== "";
 }
 
+import type { AttachedSourceScope } from "../../core/contracts/project.ts";
+export type { AttachedSourceScope };
+
+export type ObsidianFolderScope = string | AttachedSourceScope;
+
+export interface ProjectToolScopingOptions {
+	obsidianFolders?: readonly string[];
+	attachedSources?: readonly AttachedSourceScope[];
+}
+
+export type ObsidianToolScopeInput =
+	| readonly ObsidianFolderScope[]
+	| ProjectToolScopingOptions
+	| undefined;
+
 /**
- * Validates and resolves a file path strictly scoped to configured Obsidian folders.
+ * Normalizes mixed scope inputs (string folder paths, AttachedSourceScope objects, or options)
+ * into a uniform list of AttachedSourceScope records.
+ */
+export function normalizeSourceScopes(input?: ObsidianToolScopeInput): AttachedSourceScope[] {
+	if (!input) return [];
+
+	if (Array.isArray(input)) {
+		return input.map((item) => {
+			if (typeof item === "string") {
+				return {
+					rootPath: item,
+					recursive: true,
+					enabled: true,
+					include: ["**/*"],
+					exclude: [],
+				};
+			}
+			return {
+				rootPath: item.rootPath,
+				recursive: item.recursive ?? true,
+				enabled: item.enabled ?? true,
+				include: item.include && item.include.length > 0 ? item.include : ["**/*"],
+				exclude: item.exclude ?? [],
+				sourceId: item.sourceId,
+				vaultId: item.vaultId,
+				projectId: item.projectId,
+			};
+		});
+	}
+
+	const opts = input as ProjectToolScopingOptions;
+	const result: AttachedSourceScope[] = [];
+	if (opts.attachedSources && opts.attachedSources.length > 0) {
+		result.push(...normalizeSourceScopes(opts.attachedSources));
+	}
+	if (opts.obsidianFolders && opts.obsidianFolders.length > 0) {
+		result.push(...normalizeSourceScopes(opts.obsidianFolders));
+	}
+	return result;
+}
+
+/**
+ * Validates and resolves a file path strictly scoped to configured Obsidian folders
+ * or active project attached sources (Core Invariant 8).
+ *
  * Enforces:
- * 1. obsidianFolders must be configured and non-empty.
+ * 1. At least one folder or attached source scope must be configured.
  * 2. File extension must be .md, .markdown, or .mdx (case-insensitive).
  * 3. Path must not traverse through forbidden directories (.obsidian, .git, node_modules, .Trash).
- * 4. Path must resolve within at least one configured Obsidian folder (preventing traversal and root escapes).
- * 5. Symlinks cannot escape configured folders or enter forbidden directories (checks canonical paths).
+ * 4. Path must resolve within at least one configured Obsidian folder or attached source root.
+ * 5. Symlinks cannot escape configured roots or enter forbidden directories (canonical path checks).
+ * 6. Scoped attached sources enforce:
+ *    - Enabled source check (disabled sources are rejected).
+ *    - Recursion check (if recursive: false, nested paths are rejected).
+ *    - Include pattern matching (path relative to vault root must match at least one include pattern).
+ *    - Exclude pattern matching (path relative to vault root must not match any exclude pattern).
  */
 export async function resolveAndValidateObsidianPath(
 	rawPath: string,
-	obsidianFolders?: readonly string[],
+	scopeInput?: ObsidianToolScopeInput,
 ): Promise<string> {
-	if (!obsidianFolders || obsidianFolders.length === 0) {
-		throw new Error("No Obsidian folders are configured in Settings. Please add an Obsidian folder in Settings -> Agent first.");
+	const scopes = normalizeSourceScopes(scopeInput);
+
+	if (scopes.length === 0) {
+		throw new Error(
+			"No Obsidian folders are configured in Settings. Please add an Obsidian folder in Settings -> Agent first.",
+		);
 	}
 
 	if (!rawPath || typeof rawPath !== "string" || !rawPath.trim()) {
@@ -233,19 +301,24 @@ export async function resolveAndValidateObsidianPath(
 	}
 
 	const trimmed = rawPath.trim();
-	const normalizedRoots = obsidianFolders
-		.map((f) => (f.startsWith("~") ? f.replace(/^~(?=$|\/|\\)/, os.homedir()) : f))
-		.map((f) => path.resolve(f));
-
-	if (normalizedRoots.length === 0) {
-		throw new Error("No Obsidian folders are configured in Settings. Please add an Obsidian folder in Settings -> Agent first.");
-	}
 
 	// Extension check (case-insensitive)
 	const ext = path.extname(trimmed).toLowerCase();
 	if (!ALLOWED_MARKDOWN_EXTENSIONS.has(ext)) {
-		throw new Error(`File extension '${ext}' is not permitted. Only Markdown files (.md, .markdown, .mdx) are allowed.`);
+		throw new Error(
+			`File extension '${ext}' is not permitted. Only Markdown files (.md, .markdown, .mdx) are allowed.`,
+		);
 	}
+
+	const normalizedScopes = scopes.map((s) => {
+		const root = s.rootPath.startsWith("~")
+			? s.rootPath.replace(/^~(?=$|\/|\\)/, os.homedir())
+			: s.rootPath;
+		return {
+			...s,
+			resolvedRoot: path.resolve(root),
+		};
+	});
 
 	// Resolve target candidate path
 	let candidate: string;
@@ -255,7 +328,7 @@ export async function resolveAndValidateObsidianPath(
 		candidate = path.resolve(trimmed);
 	} else {
 		// Relative path: check if it exists in any configured folder; otherwise resolve against first folder
-		const potentialPaths = normalizedRoots.map((root) => path.resolve(root, trimmed));
+		const potentialPaths = normalizedScopes.map((s) => path.resolve(s.resolvedRoot, trimmed));
 		let selected = potentialPaths[0]!;
 		for (const p of potentialPaths) {
 			try {
@@ -275,19 +348,19 @@ export async function resolveAndValidateObsidianPath(
 		throw new Error("Access to protected directory (.obsidian, .git, node_modules, .Trash) is forbidden.");
 	}
 
-	// Confinement check: candidate must be inside at least one configured folder
-	const insideLogical = normalizedRoots.some((root) => isInsideFolder(root, candidate));
-	if (!insideLogical) {
+	// Confinement check: candidate must be inside at least one configured folder / attached source
+	const matchingScopes = normalizedScopes.filter((s) => isInsideFolder(s.resolvedRoot, candidate));
+	if (matchingScopes.length === 0) {
 		throw new Error(`Path '${rawPath}' is outside all configured Obsidian folders.`);
 	}
 
 	// Canonical folder roots (resolving symlinks if folders exist)
 	const canonicalRoots = await Promise.all(
-		normalizedRoots.map(async (root) => {
+		matchingScopes.map(async (s) => {
 			try {
-				return await fs.realpath(root);
+				return await fs.realpath(s.resolvedRoot);
 			} catch {
-				return root;
+				return s.resolvedRoot;
 			}
 		}),
 	);
@@ -333,6 +406,47 @@ export async function resolveAndValidateObsidianPath(
 		if (!insideCanonical) {
 			throw new Error(`Path '${rawPath}' is outside all configured Obsidian folders.`);
 		}
+	}
+
+	// Active project attached source scope rules (enabled, recursive, include, exclude)
+	let lastScopeViolation: string | null = null;
+	const isPermitted = matchingScopes.some((s) => {
+		if (s.enabled === false) {
+			lastScopeViolation = `Source '${s.sourceId ?? s.rootPath}' is disabled.`;
+			return false;
+		}
+
+		const rel = path.relative(s.resolvedRoot, candidate);
+		const relDir = path.dirname(rel);
+		if (s.recursive === false && relDir !== "." && relDir !== "") {
+			lastScopeViolation = `Path '${rawPath}' is in a subfolder, but the attached project source is non-recursive.`;
+			return false;
+		}
+
+		const relPosix = rel.split(path.sep).join("/");
+		if (s.exclude && s.exclude.length > 0) {
+			const excluded = s.exclude.some((pattern: string) => matchGlob(relPosix, pattern));
+			if (excluded) {
+				lastScopeViolation = `Path '${rawPath}' is excluded by active project source scope.`;
+				return false;
+			}
+		}
+
+		if (s.include && s.include.length > 0) {
+			const included = s.include.some((pattern: string) => matchGlob(relPosix, pattern));
+			if (!included) {
+				lastScopeViolation = `Path '${rawPath}' does not match any included pattern in the active project source scope.`;
+				return false;
+			}
+		}
+
+		return true;
+	});
+
+	if (!isPermitted) {
+		throw new Error(
+			lastScopeViolation ?? `Path '${rawPath}' is not permitted by any active project source.`,
+		);
 	}
 
 	return candidate;

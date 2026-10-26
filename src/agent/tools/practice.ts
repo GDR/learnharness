@@ -29,6 +29,7 @@ import { activeProblemOf } from "../../core/native-messages.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
 import { concludeResult, invalidInputResult, problemResult } from "../tool-execute.ts";
 import { healEncodedArguments, healToolRecord } from "./heal.ts";
+import type { AttachedSourceScope } from "../../core/contracts/project.ts";
 
 
 /** The record-reading context the gates need (the plan-tools idiom). */
@@ -48,6 +49,8 @@ export interface PracticeToolContext {
 	jobs?: JobToolContext;
 	/** Configured Obsidian project folders for scoped Markdown write/edit tools. */
 	obsidianFolders?: readonly string[];
+	/** Configured project attached source scopes for write/edit tools. */
+	attachedSources?: readonly AttachedSourceScope[];
 }
 
 /** TURN-SCOPED GATE STATE (the BKT incident, 2026-10-05): the gates used
@@ -246,8 +249,8 @@ export function practiceTools(ctx: PracticeToolContext): Record<string, AgentToo
 		ls: lsTool,
 		find: findTool,
 		grep: grepTool,
-		write: writeTool(ctx.obsidianFolders ?? []),
-		edit: editTool(ctx.obsidianFolders ?? []),
+		write: writeTool(ctx.attachedSources && ctx.attachedSources.length > 0 ? ctx.attachedSources : (ctx.obsidianFolders ?? [])),
+		edit: editTool(ctx.attachedSources && ctx.attachedSources.length > 0 ? ctx.attachedSources : (ctx.obsidianFolders ?? [])),
 		...(jobs?.research ? { research: jobs.research } : {}),
 		...(jobs ? { pdf: jobs.pdf! } : {}),
 		...(ctx.graph ? proberGraphTools(ctx.graph) : {}),

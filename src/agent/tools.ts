@@ -27,6 +27,7 @@ import { writeTool } from "./tools/write.ts";
 import { editTool } from "./tools/edit.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import type { GraphStore } from "../core/ports.ts";
+import type { AttachedSourceScope } from "../core/contracts/project.ts";
 
 export { jobTools };
 export type { ProbeDoneContext } from "./tools/probe.ts";
@@ -280,6 +281,8 @@ export interface ProberToolContext extends ProbeDoneContext {
 	graphStore?: GraphStore;
 	/** Configured Obsidian project folders for scoped Markdown write/edit tools. */
 	obsidianFolders?: readonly string[];
+	/** Configured project attached source scopes for write/edit tools. */
+	attachedSources?: readonly AttachedSourceScope[];
 }
 
 /** The prober's tool set: probe quiz (no nodeId) + ask + the learner-fs
@@ -330,8 +333,8 @@ export function createProberTools(
 				ls: lsTool,
 				find: findTool,
 				grep: grepTool,
-				write: writeTool(ctx.obsidianFolders ?? []),
-				edit: editTool(ctx.obsidianFolders ?? []),
+				write: writeTool(ctx.attachedSources && ctx.attachedSources.length > 0 ? ctx.attachedSources : (ctx.obsidianFolders ?? [])),
+				edit: editTool(ctx.attachedSources && ctx.attachedSources.length > 0 ? ctx.attachedSources : (ctx.obsidianFolders ?? [])),
 				// Job dispatch in the probe phase (owner ruling, 2026-09-20):
 				// research + pdf are ALWAYS available in every phase — the
 				// prober can verify facts or read learner PDFs while assessing.
@@ -408,6 +411,8 @@ export interface TeacherToolContext extends PlanToolContext {
 	searchAvailable?: () => boolean;
 	/** Configured Obsidian project folders for scoped Markdown write/edit tools. */
 	obsidianFolders?: readonly string[];
+	/** Configured project attached source scopes for write/edit tools. */
+	attachedSources?: readonly AttachedSourceScope[];
 }
 
 /**
@@ -465,8 +470,8 @@ export function createTeacherTools(
 			ls: lsTool,
 			find: findTool,
 			grep: grepTool,
-			write: writeTool(ctx.obsidianFolders ?? []),
-			edit: editTool(ctx.obsidianFolders ?? []),
+			write: writeTool(ctx.attachedSources && ctx.attachedSources.length > 0 ? ctx.attachedSources : (ctx.obsidianFolders ?? [])),
+			edit: editTool(ctx.attachedSources && ctx.attachedSources.length > 0 ? ctx.attachedSources : (ctx.obsidianFolders ?? [])),
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},
