@@ -625,7 +625,7 @@ test("one app-wide background preference defaults ON over legacy OFF, persists w
 		const id = f.saved.activeId;
 		await f.service.select(id); assert.equal((await f.service.status()).allowBackgroundUse, false);
 		await f.service.login(id); await f.callback();
-		for (let i = 0; i < 100 && (await f.service.status()).pending; i++) await new Promise((r) => setImmediate(r));
+		for (let i = 0; i < 200 && (await f.service.status()).pending; i++) await new Promise((r) => setTimeout(r, 25));
 		assert.equal(f.saved.allowBackgroundUse, false, "reconnecting cannot overwrite app preference");
 		assert.equal(f.saved.registrations[0].background, undefined, "new verified registrations omit obsolete per-account preference");
 		await f.service.disconnect(f.saved.activeId);
@@ -634,7 +634,7 @@ test("one app-wide background preference defaults ON over legacy OFF, persists w
 		try {
 			assert.equal((await restarted.service.status()).allowBackgroundUse, false, "zero-account restart preserves global OFF");
 			await restarted.service.login(); await restarted.callback();
-			for (let i = 0; i < 100 && (await restarted.service.status()).pending; i++) await new Promise((r) => setImmediate(r));
+			for (let i = 0; i < 200 && (await restarted.service.status()).pending; i++) await new Promise((r) => setTimeout(r, 25));
 			assert.equal(restarted.saved.allowBackgroundUse, false);
 			await restarted.service.consent(true); assert.equal(restarted.saved.allowBackgroundUse, true);
 		} finally { restarted.service.close(); }

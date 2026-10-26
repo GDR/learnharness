@@ -149,6 +149,7 @@ export const projectSourceSchema = z.object({
 
 export interface SourceDocument {
 	id: DocumentId;
+	sourceId: SourceId;
 	vaultId: VaultId;
 	currentPath: string;
 	contentHash: string;
@@ -159,6 +160,7 @@ export interface SourceDocument {
 
 export const sourceDocumentSchema = z.object({
 	id: documentIdSchema,
+	sourceId: sourceIdSchema,
 	vaultId: vaultIdSchema,
 	currentPath: z.string().min(1, "currentPath cannot be empty"),
 	contentHash: z.string().min(1, "contentHash cannot be empty"),
