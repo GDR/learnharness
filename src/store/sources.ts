@@ -223,6 +223,20 @@ export function createSourceStore(sourcesDir: string): SourceStore {
 		});
 	}
 
+	async function upsertDocuments(docsList: SourceDocument[]): Promise<void> {
+		if (docsList.length === 0) return;
+		return withLock(async () => {
+			for (const doc of docsList) {
+				sourceDocumentSchema.parse(doc);
+			}
+			const docs = await readDocumentsRecord();
+			for (const doc of docsList) {
+				docs[doc.id] = doc;
+			}
+			await writeDocumentsRecord(docs);
+		});
+	}
+
 	return {
 		listSources,
 		getSource,
@@ -231,5 +245,6 @@ export function createSourceStore(sourcesDir: string): SourceStore {
 		removeSource,
 		listDocuments,
 		upsertDocument,
+		upsertDocuments,
 	};
 }

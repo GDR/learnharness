@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync, lstatSync, realpathSync } from "node:fs";
+import { sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
@@ -6,6 +8,20 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
 const nextConfig: NextConfig = {
 	// Public build metadata only; no new runtime Electron version API.
 	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
+	turbopack: {
+		root: (() => {
+			const nmUrl = new URL("./node_modules", import.meta.url);
+			if (existsSync(nmUrl) && lstatSync(nmUrl).isSymbolicLink()) {
+				const realNM = realpathSync(nmUrl);
+				const partsA = fileURLToPath(new URL(".", import.meta.url)).split(sep);
+				const partsB = realNM.split(sep);
+				let i = 0;
+				while (i < partsA.length && i < partsB.length && partsA[i] === partsB[i]) i++;
+				return partsA.slice(0, i).join(sep) || sep;
+			}
+			return undefined;
+		})(),
+	},
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).

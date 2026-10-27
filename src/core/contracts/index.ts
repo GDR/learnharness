@@ -15,3 +15,16 @@ export * from "./models.ts";
 export * from "./local-agents.ts";
 export * from "./subscriptions.ts";
 export * from "./chatgpt.ts";
+export * from "./obsidian.ts";
+export * from "./chunker.ts";
+export * from "./indexing.ts";
+export * from "./evidence.ts";
+export * from "./reconciler.ts";
+export * from "./scope.ts";
+export * from "./session.ts";
+export * from "./generation.ts";
+export * from "./retrieval.ts";
+export * from "./ask.ts";
+export * from "./study.ts";
+export * from "./practice.ts";
+

@@ -40,6 +40,21 @@ import type {
 	MigrationCheckpoint,
 } from "./contracts/project.ts";
 export type { MigrationCheckpoint };
+import type { SourceEvidence } from "./contracts/evidence.ts";
+import type {
+	ProjectGenerationRecord,
+	CommitGenerationParams,
+	CommitGenerationResult,
+	RecoveryReport,
+} from "./contracts/generation.ts";
+import type { StudyScope } from "./contracts/scope.ts";
+import type {
+	PracticeProblemItem,
+	DocumentRevisionSnapshot,
+	DocumentWarningStatus,
+} from "./contracts/practice.ts";
+import type { SourceCitation } from "./contracts/retrieval.ts";
+import type { GraphSnapshotSummary } from "./contracts/study.ts";
 import type { UserSettings } from "./settings.ts";
 import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/local-agents.ts";
 
@@ -48,8 +63,9 @@ import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/lo
 export interface ChatStore {
 	/** Create a session record (persisted immediately). */
 	/** Create a session record; kind "practice" marks a practice session
-	 *  (absent = teach, the default). */
-	createChat(title: string, kind?: "practice"): ChatRecord;
+	 *  (absent = teach, the default). Optional scope sets study boundaries. */
+	createChat(title: string, kind?: "practice", scope?: StudyScope): ChatRecord;
+
 	/** The full record, or null if unknown id / corrupt file. */
 	getChat(id: string): ChatRecord | null;
 	/** All sessions, newest activity first (the sidebar's list view). */
@@ -69,6 +85,8 @@ export interface ChatStore {
 	/** Persist the per-chat model/thinking settings (the model control).
 	 *  Replace-whole: the picker sends the complete settings object. */
 	saveSettings(id: string, settings: ChatSettings): void;
+	/** Persist the per-chat study scope (Milestone D). */
+	saveScope?(id: string, scope: StudyScope): void;
 	/** Rename a session (the header's click-to-edit title, 2026-09-17).
 	 * Like saveSettings: a rename is NOT conversation activity — updatedAt
 	 * stays put, so sidebar order never churns on a rename. */
@@ -127,6 +145,21 @@ export interface GraphStore {
 	/** Replace the whole ledger (the settle is a full-graph computation). */
 	writePositions(positions: Record<string, Position>): void;
 
+	/** Append one or more SourceEvidence records to the project's evidence ledger. */
+	appendEvidence?(evidence: SourceEvidence | SourceEvidence[]): Promise<void>;
+	/** Append a batch of SourceEvidence records to the project's evidence ledger. */
+	appendEvidenceBatch?(evidenceList: SourceEvidence[]): Promise<void>;
+	/** Query evidence records supporting a given proposition. */
+	getEvidenceForProposition?(propositionId: string): Promise<SourceEvidence[]>;
+	/** Query evidence records extracted from a given document. */
+	getEvidenceForDocument?(documentId: DocumentId | string): Promise<SourceEvidence[]>;
+	/** Query evidence records originating from a given source. */
+	getEvidenceForSource?(sourceId: SourceId | string): Promise<SourceEvidence[]>;
+	/** Read all evidence records in append order, optionally filtered by status. */
+	readEvidence?(options?: { status?: "active" | "superseded" }): Promise<SourceEvidence[]>;
+	/** Remove all evidence records associated with a document (optional seam). */
+	removeEvidenceForDocument?(documentId: DocumentId | string): Promise<void>;
+
 	/** THE DESTRUCTIVE SEAM (session-deletion wave 6, owner 2026-09-22 —
 	 *  the first non-append operation on these ledgers): atomically
 	 *  replace the full contents of any subset of the six rewritable
@@ -140,8 +173,31 @@ export interface GraphStore {
 		chains?: GraphChain[];
 		coverage?: CoverageEntry[];
 		checkpoints?: SessionCheckpoint[];
+		evidence?: SourceEvidence[];
 	}): void;
+
+	/**
+	 * Retrieves the current authoritative project generation record.
+	 */
+	getGeneration?(): Promise<ProjectGenerationRecord>;
+
+	/**
+	 * Executes an atomic multi-ledger commit under project generation protocol.
+	 * Staged, validated against invariants, and swapped atomically.
+	 */
+	commitGeneration?(params: CommitGenerationParams): Promise<CommitGenerationResult>;
+
+	/**
+	 * Explicitly rolls back the graph ledgers to a specified previous generation (or generation - 1).
+	 */
+	rollbackGeneration?(targetGeneration?: number): Promise<ProjectGenerationRecord>;
+
+	/**
+	 * Verifies disk ledgers against generation.json and repairs any uncommitted partial writes.
+	 */
+	recoverConsistency?(): Promise<RecoveryReport>;
 }
+
 
 // ─── JobStore — background sub-agent jobs (data/jobs) ─────────────────────────
 
@@ -296,11 +352,22 @@ export interface VaultRegistry {
 export interface SourceStore {
 	listSources(projectId: ProjectId): Promise<ProjectSource[]>;
 	getSource(id: SourceId): Promise<ProjectSource | null>;
-	addSource(source: Omit<ProjectSource, "id" | "createdAt">): Promise<ProjectSource>;
+	addSource(source: {
+		projectId: ProjectId;
+		vaultId: VaultId;
+		include?: string[];
+		exclude?: string[];
+		recursive?: boolean;
+		enabled?: boolean;
+		syncMode?: "manual" | "automatic";
+		deletionPolicy?: "deactivate" | "retain";
+		id?: SourceId;
+	}): Promise<ProjectSource>;
 	updateSource(id: SourceId, patch: Partial<Omit<ProjectSource, "id" | "projectId" | "createdAt">>): Promise<ProjectSource>;
 	removeSource(id: SourceId): Promise<void>;
 	listDocuments(sourceId: SourceId): Promise<SourceDocument[]>;
 	upsertDocument(doc: SourceDocument): Promise<void>;
+	upsertDocuments?(docs: SourceDocument[]): Promise<void>;
 }
 
 // ─── PracticeStore & ProblemSet — problem sets and problem snapshots ─────────
@@ -315,6 +382,16 @@ export interface ProblemSet {
 	propositions: Record<string, { name: string; statement: string }>;
 	chains: GraphChain[];
 	status: "active" | "completed" | "archived";
+	scope?: StudyScope;
+	snapshot?: GraphSnapshotSummary;
+	problems?: PracticeProblemItem[];
+	citations?: SourceCitation[];
+	sourceSnapshots?: Record<DocumentId, DocumentRevisionSnapshot>;
+	warningSummary?: {
+		hasWarnings: boolean;
+		warningCount: number;
+		byDocumentId: Record<DocumentId, DocumentWarningStatus>;
+	};
 }
 
 export interface PracticeStore {
@@ -324,7 +401,18 @@ export interface PracticeStore {
 		nodeIds: string[];
 		propositions: Record<string, { name: string; statement: string }>;
 		chains: GraphChain[];
+		scope?: StudyScope;
+		snapshot?: GraphSnapshotSummary;
+		problems?: PracticeProblemItem[];
+		citations?: SourceCitation[];
+		sourceSnapshots?: Record<DocumentId, DocumentRevisionSnapshot>;
+		warningSummary?: {
+			hasWarnings: boolean;
+			warningCount: number;
+			byDocumentId: Record<DocumentId, DocumentWarningStatus>;
+		};
 	}): Promise<ProblemSet>;
+
 	getProblemSet(id: string): Promise<ProblemSet | null>;
 	listProblemSets(projectId?: ProjectId): Promise<ProblemSet[]>;
 	updateProblemSet(id: string, patch: Partial<ProblemSet>): Promise<ProblemSet | null>;
