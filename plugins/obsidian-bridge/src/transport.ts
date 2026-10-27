@@ -2,6 +2,7 @@ import type {
 	BridgeHealthStatus,
 	BridgeSettings,
 	StudyNoteCommandPayload,
+	StudyFolderCommandPayload,
 	StudySessionResponse,
 	AskQuestionResponse,
 } from "./types.ts";
@@ -271,6 +272,37 @@ export class BridgeTransport {
 		const body = {
 			...payload,
 			vaultId: this.settings.vaultId,
+		};
+
+		return this.executeRequest<StudySessionResponse>(endpoint, {
+			method: "POST",
+			body,
+		});
+	}
+
+	public async postStudyFolder(payload: StudyFolderCommandPayload): Promise<StudySessionResponse> {
+		if (!payload || typeof payload !== "object") {
+			throw new BridgeTransportError("Payload must be a valid object", { code: "INVALID_PAYLOAD" });
+		}
+		if (typeof payload.vaultName !== "string" || !payload.vaultName.trim()) {
+			throw new BridgeTransportError("vaultName must be a non-empty string", { code: "INVALID_PAYLOAD" });
+		}
+		if (typeof payload.folderPath !== "string") {
+			throw new BridgeTransportError("folderPath must be a string", { code: "INVALID_PAYLOAD" });
+		}
+		if (typeof payload.noteCount !== "number" || payload.noteCount < 0) {
+			throw new BridgeTransportError("noteCount must be a non-negative number", { code: "INVALID_PAYLOAD" });
+		}
+
+		const projectId = this.settings.activeProjectId?.trim();
+		const endpoint = projectId
+			? `/api/projects/${encodeURIComponent(projectId)}/study-sessions`
+			: "/api/projects/active/study-sessions";
+
+		const body = {
+			...payload,
+			vaultId: this.settings.vaultId,
+			scopeType: "folder",
 		};
 
 		return this.executeRequest<StudySessionResponse>(endpoint, {
