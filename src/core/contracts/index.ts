@@ -19,3 +19,5 @@ export * from "./obsidian.ts";
 export * from "./chunker.ts";
 export * from "./indexing.ts";
 export * from "./evidence.ts";
+export * from "./scope.ts";
+export * from "./session.ts";

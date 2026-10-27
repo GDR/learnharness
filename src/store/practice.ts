@@ -28,6 +28,7 @@ export function createPracticeStore(practiceDir: string): PracticeStore {
 		nodeIds: string[];
 		propositions: Record<string, { name: string; statement: string }>;
 		chains: import("../core/contracts.ts").GraphChain[];
+		scope?: import("../core/contracts/scope.ts").StudyScope;
 	}): Promise<ProblemSet> {
 		fs.mkdirSync(resolvedPracticeDir, { recursive: true });
 		const now = new Date().toISOString();
@@ -42,11 +43,13 @@ export function createPracticeStore(practiceDir: string): PracticeStore {
 			propositions: { ...init.propositions },
 			chains: [...init.chains],
 			status: "active",
+			...(init.scope ? { scope: init.scope } : {}),
 		};
 
 		writeAtomicJsonSync(problemSetFile(id), problemSet);
 		return problemSet;
 	}
+
 
 	async function getProblemSet(id: string): Promise<ProblemSet | null> {
 		try {

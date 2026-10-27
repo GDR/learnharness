@@ -41,6 +41,7 @@ import type {
 } from "./contracts/project.ts";
 export type { MigrationCheckpoint };
 import type { SourceEvidence } from "./contracts/evidence.ts";
+import type { StudyScope } from "./contracts/scope.ts";
 import type { UserSettings } from "./settings.ts";
 import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/local-agents.ts";
 
@@ -49,8 +50,9 @@ import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/lo
 export interface ChatStore {
 	/** Create a session record (persisted immediately). */
 	/** Create a session record; kind "practice" marks a practice session
-	 *  (absent = teach, the default). */
-	createChat(title: string, kind?: "practice"): ChatRecord;
+	 *  (absent = teach, the default). Optional scope sets study boundaries. */
+	createChat(title: string, kind?: "practice", scope?: StudyScope): ChatRecord;
+
 	/** The full record, or null if unknown id / corrupt file. */
 	getChat(id: string): ChatRecord | null;
 	/** All sessions, newest activity first (the sidebar's list view). */
@@ -70,6 +72,8 @@ export interface ChatStore {
 	/** Persist the per-chat model/thinking settings (the model control).
 	 *  Replace-whole: the picker sends the complete settings object. */
 	saveSettings(id: string, settings: ChatSettings): void;
+	/** Persist the per-chat study scope (Milestone D). */
+	saveScope?(id: string, scope: StudyScope): void;
 	/** Rename a session (the header's click-to-edit title, 2026-09-17).
 	 * Like saveSettings: a rename is NOT conversation activity — updatedAt
 	 * stays put, so sidebar order never churns on a rename. */
@@ -344,6 +348,7 @@ export interface ProblemSet {
 	propositions: Record<string, { name: string; statement: string }>;
 	chains: GraphChain[];
 	status: "active" | "completed" | "archived";
+	scope?: StudyScope;
 }
 
 export interface PracticeStore {
@@ -353,7 +358,9 @@ export interface PracticeStore {
 		nodeIds: string[];
 		propositions: Record<string, { name: string; statement: string }>;
 		chains: GraphChain[];
+		scope?: StudyScope;
 	}): Promise<ProblemSet>;
+
 	getProblemSet(id: string): Promise<ProblemSet | null>;
 	listProblemSets(projectId?: ProjectId): Promise<ProblemSet[]>;
 	updateProblemSet(id: string, patch: Partial<ProblemSet>): Promise<ProblemSet | null>;
