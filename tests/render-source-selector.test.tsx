@@ -7,6 +7,7 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -14,7 +15,12 @@ import {
 	extractSourceRootPath,
 } from "../components/settings/source-selector.tsx";
 import { ProjectSection } from "../components/settings/project-section.tsx";
-import type { Project, ProjectSource, Vault } from "../src/core/index.ts";
+import {
+	DEFAULT_SOURCE_EXCLUDE,
+	type Project,
+	type ProjectSource,
+	type Vault,
+} from "../src/core/index.ts";
 
 const mockVaultA: Vault = {
 	id: "vault_research",
@@ -138,6 +144,25 @@ describe("Milestone B Slice 5 — extractSourceRootPath", () => {
 				include: ["Physics/**", "Chemistry/**"],
 			}),
 			"",
+		);
+	});
+
+	it("normalizes Windows backslashes in include patterns and rootPath", () => {
+		assert.equal(
+			extractSourceRootPath({
+				...mockSourceEntire,
+				include: ["Physics\\Mechanics/**/*"],
+			}),
+			"Physics/Mechanics",
+		);
+		const custom = {
+			...mockSourceEntire,
+			rootPath: "Notes\\Physics",
+			include: ["**/*"],
+		};
+		assert.equal(
+			extractSourceRootPath(custom as unknown as ProjectSource),
+			"Notes/Physics",
 		);
 	});
 });
@@ -278,6 +303,48 @@ describe("Milestone B Slice 5 — SourceSelector SSR Rendering", () => {
 		assert.ok(html.includes(">deactivate<"), "deletion policy is deactivate");
 		assert.ok(html.includes(">Enable<"), "toggle text is Enable for disabled source");
 	});
+
+	it("renders default exclude globs matching DEFAULT_SOURCE_EXCLUDE in form value and placeholder", () => {
+		const html = renderToStaticMarkup(
+			<SourceSelector
+				projectId="proj_active"
+				initialSources={[]}
+				initialVaults={[mockVaultA]}
+			/>,
+		);
+		const expectedGlobs = DEFAULT_SOURCE_EXCLUDE.join(", ");
+		assert.ok(
+			html.includes(`value="${expectedGlobs}"`),
+			`default exclude value matches DEFAULT_SOURCE_EXCLUDE: ${expectedGlobs}`,
+		);
+		assert.ok(
+			html.includes(".git/**"),
+			"default exclude includes .git/**",
+		);
+		assert.ok(
+			html.includes("node_modules/**"),
+			"default exclude includes node_modules/**",
+		);
+		assert.ok(
+			html.includes(`placeholder="${expectedGlobs}"`),
+			"exclude globs placeholder matches DEFAULT_SOURCE_EXCLUDE",
+		);
+	});
+
+	it("normalizes Windows backslashes in folder path input to forward slashes in preview", () => {
+		const html = renderToStaticMarkup(
+			<SourceSelector
+				projectId="proj_active"
+				initialSources={[]}
+				initialVaults={[mockVaultA]}
+				initialFolderPath={"Quantum\\Physics\\Notes"}
+			/>,
+		);
+		assert.ok(
+			html.includes("Research Vault/Quantum/Physics/Notes/**"),
+			"path preview normalizes backslashes to forward slashes",
+		);
+	});
 });
 
 describe("Milestone B Slice 5 — ProjectSection with SourceSelector SSR Integration", () => {
@@ -304,3 +371,66 @@ describe("Milestone B Slice 5 — ProjectSection with SourceSelector SSR Integra
 		assert.ok(html.includes("Research Vault (Entire Vault)"), "source path preview rendered");
 	});
 });
+
+describe("Milestone B Slice 5 — Remediation & Static Contract Audits", () => {
+	it("verifies loadData does not include selectedVaultId in dependency array", () => {
+		const source = fs.readFileSync(
+			new URL("../components/settings/source-selector.tsx", import.meta.url),
+			"utf8",
+		);
+		assert.doesNotMatch(
+			source,
+			/const loadData = useCallback\([\s\S]*?\], \[[^\]]*selectedVaultId[^\]]*\]\)/,
+			"loadData must not depend on selectedVaultId to eliminate refetch loop",
+		);
+	});
+
+	it("verifies loadData uses functional updater for setSelectedVaultId", () => {
+		const source = fs.readFileSync(
+			new URL("../components/settings/source-selector.tsx", import.meta.url),
+			"utf8",
+		);
+		assert.match(
+			source,
+			/setSelectedVaultId\(\s*\(\s*curr(?:ent)?\s*\)\s*=>\s*curr(?:ent)?\s*\|\|\s*\(loadedVaults\[0\]\?\.id\s*\?\?\s*""\)\s*\)/,
+			"loadData must use functional updater to avoid closing over selectedVaultId",
+		);
+	});
+
+	it("verifies loadData invokes setLoading(true) at start when initialSources is absent", () => {
+		const source = fs.readFileSync(
+			new URL("../components/settings/source-selector.tsx", import.meta.url),
+			"utf8",
+		);
+		assert.match(
+			source,
+			/const loadData = useCallback[\s\S]*?if \(initialSources === undefined\) \{\s*setLoading\(true\);\s*\}/,
+			"loadData must set loading state when fetching initial data",
+		);
+	});
+
+	it("verifies handleAttachSource normalizes backslashes before attaching", () => {
+		const source = fs.readFileSync(
+			new URL("../components/settings/source-selector.tsx", import.meta.url),
+			"utf8",
+		);
+		assert.match(
+			source,
+			/const normalizedFolder = folderPath\.trim\(\)\.replace\(\/\\\\\/g,\s*"\/"\)/,
+			"handleAttachSource must normalize Windows backslashes",
+		);
+	});
+
+	it("verifies key={activeProject.id} is bound to SourceSelector in ProjectSection", () => {
+		const source = fs.readFileSync(
+			new URL("../components/settings/project-section.tsx", import.meta.url),
+			"utf8",
+		);
+		assert.match(
+			source,
+			/<SourceSelector[^>]*\bkey=\{activeProject\.id\}/,
+			"ProjectSection must pass key={activeProject.id} to SourceSelector for workspace isolation",
+		);
+	});
+});
+

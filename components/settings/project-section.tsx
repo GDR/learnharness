@@ -244,7 +244,9 @@ export function ProjectSection({
 					</SettingsRow>
 
 					<SourceSelector
+						key={activeProject.id}
 						projectId={activeProject.id}
+						activeProjectId={activeProject.id}
 						initialSources={initialSources}
 						initialVaults={initialVaults}
 					/>

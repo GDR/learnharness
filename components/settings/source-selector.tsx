@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { ProjectSource, Vault } from "@/src/core";
+import { DEFAULT_SOURCE_EXCLUDE, type ProjectSource, type Vault } from "@/src/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -12,13 +12,14 @@ import { cn } from "@/lib/utils";
  */
 export function extractSourceRootPath(source: ProjectSource): string {
 	if ((source as { rootPath?: string }).rootPath) {
-		return (source as { rootPath?: string }).rootPath!;
+		return (source as { rootPath?: string }).rootPath!.replace(/\\/g, "/");
 	}
 	if (!source.include || source.include.length === 0) {
 		return "";
 	}
 	const prefixes: string[] = [];
-	for (const pattern of source.include) {
+	for (const rawPattern of source.include) {
+		const pattern = rawPattern.replace(/\\/g, "/");
 		const match = /^([^*?]+)\/[*?]/.exec(pattern);
 		if (match && match[1]) {
 			prefixes.push(match[1].replace(/^\/+|\/+$/g, ""));
@@ -34,17 +35,22 @@ export function extractSourceRootPath(source: ProjectSource): string {
 
 export interface SourceSelectorProps {
 	projectId?: string | null;
+	activeProjectId?: string | null;
 	initialSources?: ProjectSource[];
 	initialVaults?: Vault[];
+	initialFolderPath?: string;
 	onSourcesChange?: () => void;
 }
 
 export function SourceSelector({
-	projectId,
+	projectId: explicitProjectId,
+	activeProjectId,
 	initialSources,
 	initialVaults,
+	initialFolderPath,
 	onSourcesChange,
 }: SourceSelectorProps = {}) {
+	const projectId = explicitProjectId ?? activeProjectId;
 	const [sources, setSources] = useState<ProjectSource[]>(initialSources ?? []);
 	const [vaults, setVaults] = useState<Vault[]>(initialVaults ?? []);
 	const [loading, setLoading] = useState(
@@ -56,15 +62,20 @@ export function SourceSelector({
 	const [selectedVaultId, setSelectedVaultId] = useState<string>(
 		initialVaults?.[0]?.id ?? "",
 	);
-	const [folderPath, setFolderPath] = useState("");
+	const [folderPath, setFolderPath] = useState(initialFolderPath ?? "");
 	const [includeGlobs, setIncludeGlobs] = useState("**/*");
-	const [excludeGlobs, setExcludeGlobs] = useState(".obsidian/**, .trash/**");
+	const [excludeGlobs, setExcludeGlobs] = useState(
+		DEFAULT_SOURCE_EXCLUDE.join(", "),
+	);
 	const [recursive, setRecursive] = useState(true);
 	const [deletionPolicy, setDeletionPolicy] = useState<"retain" | "deactivate">("retain");
 	const [attaching, setAttaching] = useState(false);
 
 	const loadData = useCallback(async () => {
 		if (!projectId) return;
+		if (initialSources === undefined) {
+			setLoading(true);
+		}
 		try {
 			setError(null);
 			const [sourcesRes, vaultsRes] = await Promise.all([
@@ -81,15 +92,13 @@ export function SourceSelector({
 			const loadedVaults = vaultsData.vaults || [];
 			setSources(sourcesData.sources || []);
 			setVaults(loadedVaults);
-			if (loadedVaults.length > 0 && !selectedVaultId) {
-				setSelectedVaultId(loadedVaults[0]!.id);
-			}
+			setSelectedVaultId((current) => current || (loadedVaults[0]?.id ?? ""));
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
 			setLoading(false);
 		}
-	}, [projectId, selectedVaultId]);
+	}, [projectId, initialSources]);
 
 	useEffect(() => {
 		if (projectId && initialSources === undefined) {
@@ -154,7 +163,8 @@ export function SourceSelector({
 		e.preventDefault();
 		if (!projectId || !selectedVaultId) return;
 
-		const cleanFolder = folderPath.trim().replace(/^\/+|\/+$/g, "");
+		const normalizedFolder = folderPath.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
+		const cleanFolder = normalizedFolder.replace(/^\/+|\/+$/g, "");
 		const rawIncludes = includeGlobs
 			.split(",")
 			.map((s) => s.trim())
@@ -174,7 +184,7 @@ export function SourceSelector({
 			.map((s) => s.trim())
 			.filter(Boolean);
 		const finalExcludes =
-			rawExcludes.length > 0 ? rawExcludes : [".obsidian/**", ".trash/**", ".git/**"];
+			rawExcludes.length > 0 ? rawExcludes : [...DEFAULT_SOURCE_EXCLUDE];
 
 		setAttaching(true);
 		setError(null);
@@ -198,7 +208,7 @@ export function SourceSelector({
 			setSources((prev) => [...prev, data.source]);
 			setFolderPath("");
 			setIncludeGlobs("**/*");
-			setExcludeGlobs(".obsidian/**, .trash/**");
+			setExcludeGlobs(DEFAULT_SOURCE_EXCLUDE.join(", "));
 			if (onSourcesChange) onSourcesChange();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -209,7 +219,8 @@ export function SourceSelector({
 
 	const selectedVault = vaults.find((v) => v.id === selectedVaultId);
 	const vaultDisplayName = selectedVault ? selectedVault.displayName : (selectedVaultId || "vault");
-	const cleanFolderPreview = folderPath.trim().replace(/^\/+|\/+$/g, "");
+	const normalizedFolderPreview = folderPath.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
+	const cleanFolderPreview = normalizedFolderPreview.replace(/^\/+|\/+$/g, "");
 	const livePathPreview = cleanFolderPreview
 		? `${vaultDisplayName}/${cleanFolderPreview}/**`
 		: `${vaultDisplayName}/**`;
@@ -436,7 +447,7 @@ export function SourceSelector({
 								<Input
 									value={excludeGlobs}
 									onChange={(e) => setExcludeGlobs(e.target.value)}
-									placeholder=".obsidian/**, .trash/**, .git/**"
+									placeholder=".obsidian/**, .trash/**, .git/**, node_modules/**"
 									aria-label="Exclude Globs"
 									data-testid="input-exclude-globs"
 									className="h-7 text-xs"
