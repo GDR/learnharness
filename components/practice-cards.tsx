@@ -2,7 +2,9 @@
 
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
-import type { ArtifactPartProps } from "@/src/core";
+import type { ArtifactPartProps, DocumentWarningStatus, SourceCitation } from "@/src/core";
+import { DocumentStatusBadge } from "./practice/document-status-badge.tsx";
+import { CitationBadge } from "./composer/citation-badge.tsx";
 
 /**
  * The practice transcript cards (practice sessions, owner design
@@ -60,14 +62,35 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 	// statement — same container + eyebrow discipline as the answered card
 	// and the dock (which mirrors this in Slice D). The commitment never
 	// renders — only the call's statement.
-	const input = (part.input ?? {}) as { statement?: string };
+	const input = (part.input ?? {}) as {
+		statement?: string;
+		warningStatus?: DocumentWarningStatus;
+		warningMessage?: string;
+		citations?: SourceCitation[];
+	};
 	const statement = typeof input.statement === "string" ? input.statement : "";
+	const warningStatus = input.warningStatus;
+	const warningMessage = input.warningMessage;
+	const citations = Array.isArray(input.citations) ? input.citations : [];
+
 	return (
 		<div data-testid="problem-card" className="lh-card-enter my-1 rounded-xl border bg-card p-4">
-			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
+			<div className="mb-1 flex items-center justify-between">
+				<span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</span>
+				{warningStatus && (
+					<DocumentStatusBadge status={warningStatus} message={warningMessage} />
+				)}
+			</div>
 			<div className="lh-prose text-[15px]">
 				<ToolContentResponse>{statement}</ToolContentResponse>
 			</div>
+			{citations.length > 0 && (
+				<div data-testid="problem-citations" className="mt-3 flex flex-wrap gap-1.5 pt-2 border-t border-border/50">
+					{citations.map((c, i) => (
+						<CitationBadge key={`${c.documentId}-${i}`} citation={c} index={i + 1} />
+					))}
+				</div>
+			)}
 		</div>
 	);
 }
@@ -100,7 +123,13 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 	// below in the quiz-explanation register (small, muted, low-key).
 	// Nothing collapsible. Legacy inputs (pre-slim records) that carry
 	// their own solutionReveal fall back to it.
-	const input = (part.input ?? {}) as { outcome?: string; verdict?: string; solutionReveal?: string };
+	const input = (part.input ?? {}) as {
+		outcome?: string;
+		verdict?: string;
+		solutionReveal?: string;
+		warningStatus?: DocumentWarningStatus;
+		warningMessage?: string;
+	};
 	const outcome = typeof input.outcome === "string" ? input.outcome : "";
 	const verdict = typeof input.verdict === "string" ? input.verdict : "";
 	const reveal =
@@ -127,6 +156,9 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 					<span className={cn("rounded px-1.5 py-0.5", OUTCOME_CHIP[outcome] ?? OUTCOME_CHIP.movedOn)}>
 						{OUTCOME_LABEL[outcome]}
 					</span>
+				)}
+				{input.warningStatus && (
+					<DocumentStatusBadge status={input.warningStatus} message={input.warningMessage} />
 				)}
 			</div>
 			{/* The verdict — plain prose under the heading, no 'Verdict:' label
@@ -174,8 +206,8 @@ function MetadataPopover({
 	concludeInput,
 	problemInput,
 }: {
-	concludeInput: { outcome?: string; rung?: unknown; missClass?: unknown; retest?: unknown };
-	problemInput: { mode?: unknown; target?: unknown };
+	concludeInput: { outcome?: string; rung?: unknown; missClass?: unknown; retest?: unknown; warningStatus?: DocumentWarningStatus };
+	problemInput: { mode?: unknown; target?: unknown; warningStatus?: DocumentWarningStatus };
 }) {
 	const [open, setOpen] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -281,6 +313,14 @@ function MetadataPopover({
 						<dd className="font-mono">{miss || "none"}</dd>
 						<dt className="text-muted-foreground">Retest</dt>
 						<dd className="font-mono">{retest === undefined ? "—" : retest ? "yes" : "no"}</dd>
+						{(concludeInput.warningStatus || problemInput.warningStatus) && (
+							<>
+								<dt className="text-muted-foreground">Doc Status</dt>
+								<dd className="font-mono">
+									<DocumentStatusBadge status={(concludeInput.warningStatus || problemInput.warningStatus)!} />
+								</dd>
+							</>
+						)}
 					</dl>
 					</div>,
 					document.body,

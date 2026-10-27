@@ -29,6 +29,15 @@ export function createPracticeStore(practiceDir: string): PracticeStore {
 		propositions: Record<string, { name: string; statement: string }>;
 		chains: import("../core/contracts.ts").GraphChain[];
 		scope?: import("../core/contracts/scope.ts").StudyScope;
+		snapshot?: import("../core/contracts/study.ts").GraphSnapshotSummary;
+		problems?: import("../core/contracts/practice.ts").PracticeProblemItem[];
+		citations?: import("../core/contracts/retrieval.ts").SourceCitation[];
+		sourceSnapshots?: Record<string, import("../core/contracts/practice.ts").DocumentRevisionSnapshot>;
+		warningSummary?: {
+			hasWarnings: boolean;
+			warningCount: number;
+			byDocumentId: Record<string, import("../core/contracts/practice.ts").DocumentWarningStatus>;
+		};
 	}): Promise<ProblemSet> {
 		fs.mkdirSync(resolvedPracticeDir, { recursive: true });
 		const now = new Date().toISOString();
@@ -44,6 +53,11 @@ export function createPracticeStore(practiceDir: string): PracticeStore {
 			chains: [...init.chains],
 			status: "active",
 			...(init.scope ? { scope: init.scope } : {}),
+			...(init.snapshot ? { snapshot: init.snapshot } : {}),
+			...(init.problems ? { problems: init.problems } : {}),
+			...(init.citations ? { citations: init.citations } : {}),
+			...(init.sourceSnapshots ? { sourceSnapshots: init.sourceSnapshots } : {}),
+			...(init.warningSummary ? { warningSummary: init.warningSummary } : {}),
 		};
 
 		writeAtomicJsonSync(problemSetFile(id), problemSet);

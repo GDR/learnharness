@@ -3,10 +3,10 @@
 import type { ReactNode } from "react";
 import { DumbbellIcon, GraduationCapIcon, MessageSquareIcon, SearchIcon } from "lucide-react";
 
-export type ComposerMode = "chat" | "study" | "ask";
+export type ComposerMode = "chat" | "study" | "practice" | "ask";
 
 /**
- * Toggle pill between Chat, Study, and Ask Sources mode.
+ * Toggle pill between Chat, Study, Practice, and Ask Sources mode.
  */
 export function ComposerModeToggle({
 	mode = "chat",
@@ -45,6 +45,19 @@ export function ComposerModeToggle({
 			>
 				<GraduationCapIcon className="size-3" aria-hidden="true" />
 				Study
+			</button>
+			<button
+				type="button"
+				data-testid="composer-mode-practice"
+				onClick={() => onChange?.("practice")}
+				className={`flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 font-ui text-xs transition-colors ${
+					mode === "practice"
+						? "bg-primary text-primary-foreground font-medium shadow-xs"
+						: "text-muted-foreground hover:text-foreground"
+				}`}
+			>
+				<DumbbellIcon className="size-3" aria-hidden="true" />
+				Practice
 			</button>
 			<button
 				type="button"

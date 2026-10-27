@@ -116,6 +116,8 @@ export {
 export * from "./contracts/ask.ts";
 // Scoped Study Sessions Domain Contracts (Milestone D Slice 4). Pure, browser-safe.
 export * from "./contracts/study.ts";
+// Scoped Practice Sets & Warning Indicators Domain Contracts (Milestone D Slice 5). Pure, browser-safe.
+export * from "./contracts/practice.ts";
 
 
 

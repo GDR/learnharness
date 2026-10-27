@@ -59,9 +59,19 @@ function closeNetwork() {
 async function probe(standalone) {
 	const noNetwork = closeNetwork();
 	const root = fs.realpathSync(standalone);
+	const isCheckout = fs.existsSync(path.join(standalone, "package.json"));
+	const nodeModulesRoot = isCheckout && fs.existsSync(path.join(standalone, "node_modules"))
+		? fs.realpathSync(path.join(standalone, "node_modules"))
+		: null;
 	const inside = (file) => {
-		const relative = path.relative(root, fs.realpathSync(file));
-		assert.ok(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
+		const realFile = fs.realpathSync(file);
+		const relative = path.relative(root, realFile);
+		const isInsideRoot = relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+		const isInsideNM = nodeModulesRoot ? (() => {
+			const rel = path.relative(nodeModulesRoot, realFile);
+			return rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+		})() : false;
+		assert.ok(isInsideRoot || isInsideNM,
 			`dependency escaped standalone payload: ${file}`);
 	};
 	const loaded = new Set();

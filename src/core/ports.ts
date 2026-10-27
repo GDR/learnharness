@@ -48,6 +48,13 @@ import type {
 	RecoveryReport,
 } from "./contracts/generation.ts";
 import type { StudyScope } from "./contracts/scope.ts";
+import type {
+	PracticeProblemItem,
+	DocumentRevisionSnapshot,
+	DocumentWarningStatus,
+} from "./contracts/practice.ts";
+import type { SourceCitation } from "./contracts/retrieval.ts";
+import type { GraphSnapshotSummary } from "./contracts/study.ts";
 import type { UserSettings } from "./settings.ts";
 import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/local-agents.ts";
 
@@ -376,6 +383,15 @@ export interface ProblemSet {
 	chains: GraphChain[];
 	status: "active" | "completed" | "archived";
 	scope?: StudyScope;
+	snapshot?: GraphSnapshotSummary;
+	problems?: PracticeProblemItem[];
+	citations?: SourceCitation[];
+	sourceSnapshots?: Record<DocumentId, DocumentRevisionSnapshot>;
+	warningSummary?: {
+		hasWarnings: boolean;
+		warningCount: number;
+		byDocumentId: Record<DocumentId, DocumentWarningStatus>;
+	};
 }
 
 export interface PracticeStore {
@@ -386,6 +402,15 @@ export interface PracticeStore {
 		propositions: Record<string, { name: string; statement: string }>;
 		chains: GraphChain[];
 		scope?: StudyScope;
+		snapshot?: GraphSnapshotSummary;
+		problems?: PracticeProblemItem[];
+		citations?: SourceCitation[];
+		sourceSnapshots?: Record<DocumentId, DocumentRevisionSnapshot>;
+		warningSummary?: {
+			hasWarnings: boolean;
+			warningCount: number;
+			byDocumentId: Record<DocumentId, DocumentWarningStatus>;
+		};
 	}): Promise<ProblemSet>;
 
 	getProblemSet(id: string): Promise<ProblemSet | null>;

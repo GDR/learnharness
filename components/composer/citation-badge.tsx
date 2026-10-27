@@ -2,13 +2,16 @@
 
 import React, { useState, useCallback } from "react";
 import { ExternalLinkIcon, CheckIcon, CopyIcon, BookOpenIcon, AlertTriangleIcon } from "lucide-react";
-import type { SourceCitation } from "@/src/core";
+import type { SourceCitation, DocumentWarningStatus } from "@/src/core";
 import { cn } from "@/lib/utils";
+import { DocumentStatusBadge } from "../practice/document-status-badge.tsx";
 
 export interface CitationBadgeProps {
 	citation: SourceCitation;
 	index?: number;
 	vaultStatus?: "available" | "unavailable";
+	warningStatus?: DocumentWarningStatus;
+	warningMessage?: string;
 	className?: string;
 	onOpen?: (citation: SourceCitation) => void;
 }
@@ -21,11 +24,14 @@ export function CitationBadge({
 	citation,
 	index,
 	vaultStatus = "available",
+	warningStatus,
+	warningMessage,
 	className,
 	onOpen,
 }: CitationBadgeProps) {
 	const [copied, setCopied] = useState(false);
-	const isUnavailable = vaultStatus === "unavailable";
+	const effectiveWarningStatus = warningStatus ?? (vaultStatus === "unavailable" ? "unavailable" : undefined);
+	const isUnavailable = vaultStatus === "unavailable" || warningStatus === "unavailable";
 
 	const handleCopy = useCallback(
 		async (e: React.MouseEvent) => {
@@ -74,6 +80,12 @@ export function CitationBadge({
 			>
 				{label}
 			</a>
+			{effectiveWarningStatus && effectiveWarningStatus !== "current" && (
+				<DocumentStatusBadge
+					status={effectiveWarningStatus}
+					message={warningMessage}
+				/>
+			)}
 			{isUnavailable ? (
 				<span
 					data-testid="citation-unavailable-warning"
