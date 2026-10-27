@@ -102,6 +102,17 @@ export * from "./contracts/scope.ts";
 export * from "./contracts/session.ts";
 // Generation Counter & Atomic Commit Contracts (Milestone C Slice 6). Pure, browser-safe.
 export * from "./contracts/generation.ts";
+// Source-Aware Retrieval & Ranking (Milestone D Slice 2). Pure, browser-safe.
+export * from "./contracts/retrieval.ts";
+export {
+	computeLineRange,
+	tokenizeText,
+	filterQueryTokens,
+	generateMatchHighlights,
+	calculateRobertsonSpärckJonesIdf,
+	STOP_WORDS,
+} from "./retrieval/scoring.ts";
+
 
 
 

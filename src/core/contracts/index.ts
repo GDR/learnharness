@@ -23,3 +23,5 @@ export * from "./reconciler.ts";
 export * from "./scope.ts";
 export * from "./session.ts";
 export * from "./generation.ts";
+export * from "./retrieval.ts";
+
