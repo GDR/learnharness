@@ -20,8 +20,21 @@ const path = require("node:path");
 module.exports = async function afterPack(context) {
 	if (context.electronPlatformName !== "darwin") return;
 	const appBundle = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
-	const target = path.join(appBundle, "Contents", "Resources", "icon.icns");
+	const resourcesDir = path.join(appBundle, "Contents", "Resources");
+	const assetsCar = path.join(resourcesDir, "Assets.car");
+	if (!fs.existsSync(assetsCar) || fs.statSync(assetsCar).size === 0) {
+		throw new Error(`[after-pack] missing or empty Assets.car at ${assetsCar}`);
+	}
+	const infoPlistPath = path.join(appBundle, "Contents", "Info.plist");
+	const infoPlist = fs.readFileSync(infoPlistPath, "utf8");
+	if (!/<key>CFBundleIconName<\/key>\s*<string>Icon<\/string>/.test(infoPlist)) {
+		throw new Error(`[after-pack] Info.plist missing CFBundleIconName=Icon at ${infoPlistPath}`);
+	}
+	if (!/<key>CFBundleIconFile<\/key>\s*<string>icon\.icns<\/string>/.test(infoPlist)) {
+		throw new Error(`[after-pack] Info.plist missing CFBundleIconFile=icon.icns at ${infoPlistPath}`);
+	}
+	const target = path.join(resourcesDir, "icon.icns");
 	const source = path.join(context.packager.info.projectDir, "build", "icon.icns");
 	fs.copyFileSync(source, target);
-	console.log(`[after-pack] pre-Tahoe fallback icns (full-res) → ${target}`);
+	console.log(`[after-pack] verified Assets.car + Info.plist and copied full-res fallback icns → ${target}`);
 };

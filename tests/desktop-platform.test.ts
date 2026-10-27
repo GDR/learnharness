@@ -146,6 +146,8 @@ describe("desktop packaging policy", () => {
 	});
 
 	it("ships Mac arm64, Windows NSIS x64, and both Linux x64 channels", () => {
+		assert.equal(config.mac.icon, "build/icon.icon");
+		assert.equal(config.dmg.icon, "build/icon.icns");
 		assert.deepEqual(config.mac.target, [
 			{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] },
 		]);
@@ -269,18 +271,21 @@ describe("desktop release workflow", () => {
 		}
 	});
 
-	it("pairs Icon Composer packaging with macOS 26 and Xcode selection, retaining macOS 15 CI", () => {
+	it("pairs Icon Composer packaging with macOS 15 and pinned Xcode 26.3 AssetRuntime", () => {
 		const mac = packaging.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
+		assert.equal(mac?.os, "macos-15", "release packaging builds on macos-15 using Xcode 26.3's bundled AssetRuntime");
 		assert.equal(mac?.builder_args, "--mac --arm64");
 		assert.equal(packaging["runs-on"], "${{ matrix.os }}");
 		const xcodeIndex = packaging.steps.findIndex(step => step.uses === "maxim-lobanov/setup-xcode@v1");
 		assert.ok(xcodeIndex >= 0);
 		const xcode = packaging.steps[xcodeIndex];
 		assert.equal(xcode?.if, "runner.os == 'macOS'");
-		assert.equal(xcode?.with?.["xcode-version"], "latest-stable");
+		assert.equal(xcode?.with?.["xcode-version"], "26.3");
+		const assetRuntimeStep = packaging.steps[xcodeIndex + 1];
+		assert.equal(assetRuntimeStep?.if, "runner.os == 'macOS'");
+		assert.ok(assetRuntimeStep?.run?.includes("Platforms/MacOSX.platform/System/AssetRuntime/System/Library/PrivateFrameworks"));
 		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
-		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
+		assert.ok(buildIndex > xcodeIndex + 1, "select Xcode and configure AssetRuntime before packaging compiles the icon");
 
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
