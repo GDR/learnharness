@@ -53,3 +53,5 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	list_sessions: ToolCallCard,
 	list_propositions: ToolCallCard,
 };
+
+export { GroundedAnswerCard } from "./grounded-answer-card.tsx";

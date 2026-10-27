@@ -5,3 +5,4 @@
 export * from "../../core/contracts/retrieval.ts";
 export * from "../../core/retrieval/scoring.ts";
 export * from "./ranker.ts";
+export * from "./ask.ts";

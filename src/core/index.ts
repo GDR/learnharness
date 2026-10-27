@@ -112,6 +112,8 @@ export {
 	calculateRobertsonSpärckJonesIdf,
 	STOP_WORDS,
 } from "./retrieval/scoring.ts";
+// Ask Sources Domain Contracts (Milestone D Slice 3). Pure, browser-safe.
+export * from "./contracts/ask.ts";
 
 
 
