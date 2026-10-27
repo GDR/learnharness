@@ -100,7 +100,7 @@ describe("Milestone C Slice 2: Section-Aware Markdown Chunker", () => {
 			assert.ok(chunks[1]!.content.includes("Main section body"));
 		});
 
-		it("preserves deep ancestor heading hierarchy (H1..H3)", () => {
+		it("preserves deep ancestor heading hierarchy (H1..H3) with disjoint non-overlapping ranges", () => {
 			const markdown = [
 				"# Physics",
 				"General physics overview.",
@@ -123,6 +123,17 @@ describe("Milestone C Slice 2: Section-Aware Markdown Chunker", () => {
 				"Quantum Mechanics",
 				"Wave Mechanics",
 			]);
+
+			// Verify disjoint non-overlapping ranges across hierarchical chunks
+			for (let i = 0; i < chunks.length - 1; i++) {
+				assert.ok(
+					chunks[i]!.range.endOffset <= chunks[i + 1]!.range.startOffset,
+					`Chunk ${i} and ${i + 1} must have disjoint character ranges`,
+				);
+			}
+			assert.ok(!chunks[0]!.content.includes("Quantum fundamentals"));
+			assert.ok(!chunks[0]!.content.includes("De Broglie waves"));
+			assert.ok(!chunks[1]!.content.includes("De Broglie waves"));
 		});
 	});
 
@@ -442,6 +453,227 @@ describe("Milestone C Slice 2: Section-Aware Markdown Chunker", () => {
 
 			const mathChunk = chunks.find((c) => c.hasEquation);
 			assert.ok(mathChunk, "Must contain gravitation equation in Newton note");
+		});
+
+		it("guarantees disjoint non-overlapping ranges on Schrodinger.md with zero subsection duplication", () => {
+			const filePath = path.join(FIXTURES_DIR, "Physics/Quantum/Schrodinger.md");
+			const content = fs.readFileSync(filePath, "utf-8");
+			const parsed = parseObsidianMarkdown(content, "Physics/Quantum/Schrodinger.md");
+
+			const chunks = chunkObsidianDocument(parsed, content, { maxTokens: 400 });
+
+			// Verify disjoint ranges
+			for (let i = 0; i < chunks.length - 1; i++) {
+				assert.ok(
+					chunks[i]!.range.endOffset <= chunks[i + 1]!.range.startOffset,
+					`Chunks ${i} and ${i + 1} must be strictly disjoint: ${chunks[i]!.range.endOffset} <= ${chunks[i + 1]!.range.startOffset}`,
+				);
+			}
+
+			// Verify parent H1 chunk does NOT contain child H2 titles or content
+			const h1Chunk = chunks.find((c) => c.heading === "Erwin Schrödinger and Wave Mechanics");
+			assert.ok(h1Chunk, "H1 chunk must exist");
+			assert.ok(
+				!h1Chunk.content.includes("The Time-Dependent Schrödinger Equation"),
+				"Parent H1 chunk must not duplicate child H2 heading",
+			);
+			assert.ok(
+				!h1Chunk.content.includes("Probabilistic Interpretation and Normalization"),
+				"Parent H1 chunk must not duplicate child H2 subsection",
+			);
+
+			// Verify 100% character slice match
+			for (const chunk of chunks) {
+				assert.equal(
+					content.slice(chunk.range.startOffset, chunk.range.endOffset),
+					chunk.content,
+				);
+			}
+		});
+
+		it("guarantees disjoint non-overlapping ranges on LinearAlgebra.md with zero subsection duplication", () => {
+			const filePath = path.join(FIXTURES_DIR, "Math/LinearAlgebra.md");
+			const content = fs.readFileSync(filePath, "utf-8");
+			const parsed = parseObsidianMarkdown(content, "Math/LinearAlgebra.md");
+
+			const chunks = chunkObsidianDocument(parsed, content, { maxTokens: 400 });
+
+			assert.ok(chunks.length >= 4, `Expected at least 4 chunks, got ${chunks.length}`);
+
+			// Verify strictly disjoint ranges
+			for (let i = 0; i < chunks.length - 1; i++) {
+				assert.ok(
+					chunks[i]!.range.endOffset <= chunks[i + 1]!.range.startOffset,
+					`LinearAlgebra chunk ${i} and ${i + 1} must be disjoint: ${chunks[i]!.range.endOffset} <= ${chunks[i + 1]!.range.startOffset}`,
+				);
+			}
+
+			// Verify parent H1 chunk does NOT contain child subsections
+			const h1Chunk = chunks.find((c) => c.heading === "Linear Algebra");
+			assert.ok(h1Chunk, "Linear Algebra H1 chunk must exist");
+			assert.ok(
+				!h1Chunk.content.includes("Vector Spaces and Inner Products"),
+				"H1 must not duplicate Vector Spaces",
+			);
+			assert.ok(
+				!h1Chunk.content.includes("Matrices and Transformations"),
+				"H1 must not duplicate Matrices",
+			);
+			assert.ok(
+				!h1Chunk.content.includes("Eigenvalues and Eigenvectors"),
+				"H1 must not duplicate Eigenvalues",
+			);
+
+			// Verify character offset invariant
+			for (const chunk of chunks) {
+				assert.equal(
+					content.slice(chunk.range.startOffset, chunk.range.endOffset),
+					chunk.content,
+				);
+			}
+		});
+
+		it("handles synthetic nested heading hierarchies (H1 -> H2 -> H3) with disjoint ranges and zero duplication", () => {
+			const markdown = [
+				"# Top Topic",
+				"Top level introduction.",
+				"",
+				"## Sub Topic",
+				"Sub level content.",
+				"",
+				"### Leaf Topic",
+				"Leaf level details.",
+			].join("\n");
+
+			const parsed = parseObsidianMarkdown(markdown);
+			const chunks = chunkObsidianDocument(parsed, markdown);
+
+			assert.equal(chunks.length, 3);
+			for (let i = 0; i < chunks.length - 1; i++) {
+				assert.ok(
+					chunks[i]!.range.endOffset <= chunks[i + 1]!.range.startOffset,
+					`Synthetic chunk ${i} and ${i + 1} must be disjoint`,
+				);
+			}
+
+			assert.ok(!chunks[0]!.content.includes("Sub level content"));
+			assert.ok(!chunks[0]!.content.includes("Leaf level details"));
+			assert.ok(!chunks[1]!.content.includes("Leaf level details"));
+
+			for (const chunk of chunks) {
+				assert.equal(
+					markdown.slice(chunk.range.startOffset, chunk.range.endOffset),
+					chunk.content,
+				);
+			}
+		});
+
+		it("handles ancestor heading without direct body before child heading cleanly without duplication", () => {
+			const markdown = [
+				"# Parent Without Body",
+				"## Child One",
+				"Child one content text.",
+				"## Child Two",
+				"Child two content text.",
+			].join("\n");
+
+			const parsed = parseObsidianMarkdown(markdown);
+			const chunks = chunkObsidianDocument(parsed, markdown);
+
+			assert.equal(chunks.length, 2);
+			assert.deepEqual(chunks[0]!.headingHierarchy, ["Parent Without Body", "Child One"]);
+			assert.deepEqual(chunks[1]!.headingHierarchy, ["Parent Without Body", "Child Two"]);
+			assert.ok(chunks[0]!.range.endOffset <= chunks[1]!.range.startOffset);
+
+			for (const chunk of chunks) {
+				assert.equal(
+					markdown.slice(chunk.range.startOffset, chunk.range.endOffset),
+					chunk.content,
+				);
+			}
+		});
+	});
+
+	// ─── 8. ChunkerOptions: minTokens and overlapTokens ─────────────────────────
+
+	describe("ChunkerOptions: minTokens and overlapTokens Fulfillment", () => {
+		it("filters out chunks below minTokens when other satisfying chunks exist", () => {
+			const markdown = [
+				"# Stub Section",
+				"Small.",
+				"",
+				"# Main Section",
+				"This is a substantially larger section with ample content to easily exceed the twenty token threshold requirement.",
+			].join("\n");
+
+			const parsed = parseObsidianMarkdown(markdown);
+
+			// Without minTokens: both chunks emitted
+			const allChunks = chunkObsidianDocument(parsed, markdown);
+			assert.equal(allChunks.length, 2);
+
+			// With minTokens: 20 -> stub section (< 20 tokens) is filtered out
+			const filteredChunks = chunkObsidianDocument(parsed, markdown, { minTokens: 20 });
+			assert.equal(filteredChunks.length, 1);
+			assert.equal(filteredChunks[0]!.heading, "Main Section");
+			assert.ok(filteredChunks[0]!.tokenEstimate >= 20);
+			assert.equal(
+				markdown.slice(filteredChunks[0]!.range.startOffset, filteredChunks[0]!.range.endOffset),
+				filteredChunks[0]!.content,
+			);
+		});
+
+		it("preserves chunks when all content in the document is below minTokens", () => {
+			const markdown = [
+				"# Concise Note",
+				"Brief statement.",
+			].join("\n");
+
+			const parsed = parseObsidianMarkdown(markdown);
+			const chunks = chunkObsidianDocument(parsed, markdown, { minTokens: 50000 });
+
+			assert.equal(chunks.length, 1);
+			assert.equal(
+				markdown.slice(chunks[0]!.range.startOffset, chunks[0]!.range.endOffset),
+				chunks[0]!.content,
+			);
+		});
+
+		it("produces overlapping slices when overlapTokens > 0 on split large blocks", () => {
+			const sentence = "The quantum harmonic oscillator exhibits discrete eigenvalues in bound states. ";
+			const markdown = "# Quantum Mechanics\n" + sentence.repeat(15);
+			const parsed = parseObsidianMarkdown(markdown);
+
+			// Default: disjoint chunks (overlapTokens = 0)
+			const disjoint = chunkObsidianDocument(parsed, markdown, { maxTokens: 40, overlapTokens: 0 });
+			for (let i = 0; i < disjoint.length - 1; i++) {
+				assert.ok(
+					disjoint[i]!.range.endOffset <= disjoint[i + 1]!.range.startOffset,
+					`Disjoint chunks must not overlap: ${disjoint[i]!.range.endOffset} <= ${disjoint[i + 1]!.range.startOffset}`,
+				);
+			}
+
+			// Overlap: adjacent split slices rewind by up to overlapTokens
+			const overlapping = chunkObsidianDocument(parsed, markdown, { maxTokens: 40, overlapTokens: 15 });
+			assert.ok(overlapping.length > 1, "Should produce multiple slices");
+
+			// Check that adjacent slices from the split block overlap
+			let foundOverlap = false;
+			for (let i = 0; i < overlapping.length - 1; i++) {
+				if (overlapping[i + 1]!.range.startOffset < overlapping[i]!.range.endOffset) {
+					foundOverlap = true;
+				}
+			}
+			assert.ok(foundOverlap, "Adjacent slices must overlap when overlapTokens > 0");
+
+			// Verify 100% character offset fidelity across ALL overlapping chunks
+			for (const chunk of overlapping) {
+				assert.equal(
+					markdown.slice(chunk.range.startOffset, chunk.range.endOffset),
+					chunk.content,
+					`Slice mismatch for chunk ${chunk.id}`,
+				);
+			}
 		});
 	});
 });

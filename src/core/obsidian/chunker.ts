@@ -53,6 +53,7 @@ function splitLargeBlock(
 	block: ParsedBlock,
 	rawContent: string,
 	maxTokens: number,
+	overlapTokens?: number,
 ): Array<{ range: TextRange; content: string }> {
 	const blockStart = block.range.startOffset;
 	const blockEnd = block.range.endOffset;
@@ -158,7 +159,60 @@ function splitLargeBlock(
 			range: { startOffset: chunkStart, endOffset: chunkEnd },
 			content: rawContent.slice(chunkStart, chunkEnd),
 		});
-		pos += splitRel;
+
+		// Determine start position for next slice with overlap
+		let nextPos = pos + splitRel;
+		if (overlapTokens && overlapTokens > 0 && nextPos < blockText.length) {
+			const maxOverlapChars = Math.min(
+				overlapTokens * 4,
+				Math.max(0, splitRel - 1),
+			);
+			if (maxOverlapChars > 0) {
+				const candidateNextPos = nextPos - maxOverlapChars;
+				// Align candidateNextPos to natural boundary if feasible
+				const windowStart = Math.max(pos + 1, candidateNextPos - 16);
+				const windowEnd = Math.min(nextPos, candidateNextPos + 16);
+				const lookaround = blockText.slice(windowStart, windowEnd);
+				const relSp = lookaround.lastIndexOf(" ");
+				const relNl = lookaround.lastIndexOf("\n");
+				const bestRel = Math.max(relSp, relNl);
+				if (bestRel >= 0) {
+					const adjusted = windowStart + bestRel + 1;
+					if (adjusted > pos && adjusted < nextPos) {
+						nextPos = adjusted;
+					} else {
+						nextPos = candidateNextPos;
+					}
+				} else {
+					nextPos = candidateNextPos;
+				}
+
+				// Avoid splitting CRLF (\r\n)
+				if (nextPos > 0 && nextPos < blockText.length) {
+					if (
+						blockText.charCodeAt(nextPos - 1) === 0x0d &&
+						blockText.charCodeAt(nextPos) === 0x0a
+					) {
+						nextPos += 1;
+					}
+				}
+
+				// Avoid splitting UTF-16 surrogate pairs
+				if (nextPos > 0 && nextPos < blockText.length) {
+					const prevCode = blockText.charCodeAt(nextPos - 1);
+					if (prevCode >= 0xd800 && prevCode <= 0xdbff) {
+						nextPos += 1;
+					}
+				}
+
+				// Guarantee forward progress
+				if (nextPos <= pos) {
+					nextPos = pos + Math.max(1, Math.floor(splitRel / 2));
+				}
+			}
+		}
+
+		pos = nextPos;
 	}
 
 	return slices;
@@ -286,11 +340,13 @@ export function chunkObsidianDocument(
 	}
 
 	const maxTokens = options?.maxTokens ?? 500;
+	const overlapTokens = options?.overlapTokens ?? 0;
 	const documentPath = options?.documentPath ?? doc.filePath ?? "";
 	const chunks: MarkdownChunk[] = [];
 
 	for (const section of doc.sections) {
 		const sectionBlocks: ParsedBlock[] = [];
+		let sawOwnHeading = false;
 
 		// If section has a heading, ensure heading block is present
 		if (section.heading) {
@@ -308,19 +364,34 @@ export function chunkObsidianDocument(
 						section.heading.range.endOffset,
 					),
 				});
+				sawOwnHeading = true;
 			}
 		}
 
 		for (const b of section.blocks) {
-			if (
-				section.heading &&
-				b.kind === "heading" &&
-				b.range.startOffset === section.heading.range.startOffset &&
-				sectionBlocks.length > 0
-			) {
-				continue;
+			if (section.heading) {
+				if (
+					b.kind === "heading" &&
+					b.range.startOffset === section.heading.range.startOffset
+				) {
+					if (!sawOwnHeading) {
+						sectionBlocks.push(b);
+						sawOwnHeading = true;
+					}
+					continue;
+				}
+				// Any subsequent heading starts a child or sibling section; stop accumulating
+				if (b.kind === "heading") {
+					break;
+				}
+				sectionBlocks.push(b);
+			} else {
+				// Section has no heading (preamble before first heading)
+				if (b.kind === "heading") {
+					break;
+				}
+				sectionBlocks.push(b);
 			}
-			sectionBlocks.push(b);
 		}
 
 		// Fallback if section has no blocks but non-empty range
@@ -344,7 +415,25 @@ export function chunkObsidianDocument(
 			continue;
 		}
 
+		// If this section has only a heading and no direct body blocks,
+		// and descendant sections follow, let child chunks represent the hierarchy
+		// via headingHierarchy rather than emitting an empty heading stub.
+		const hasDirectBody = sectionBlocks.some((b) => b.kind !== "heading");
+		if (
+			!hasDirectBody &&
+			section.heading &&
+			doc.sections.some(
+				(s) =>
+					s !== section &&
+					s.heading &&
+					s.headingHierarchy.includes(section.heading!.text),
+			)
+		) {
+			continue;
+		}
+
 		let currentBlocks: ParsedBlock[] = [];
+		let lastFlushedBlocks: ParsedBlock[] = [];
 
 		const flushCurrent = () => {
 			if (currentBlocks.length === 0) return;
@@ -361,6 +450,7 @@ export function chunkObsidianDocument(
 					doc,
 				),
 			);
+			lastFlushedBlocks = currentBlocks;
 			currentBlocks = [];
 		};
 
@@ -374,7 +464,7 @@ export function chunkObsidianDocument(
 				flushCurrent();
 
 				// Split large block
-				const slices = splitLargeBlock(block, rawContent, maxTokens);
+				const slices = splitLargeBlock(block, rawContent, maxTokens, overlapTokens);
 				for (const slice of slices) {
 					chunks.push(
 						createChunk(
@@ -402,12 +492,46 @@ export function chunkObsidianDocument(
 					currentBlocks.push(block);
 				} else {
 					flushCurrent();
+
+					if (overlapTokens && overlapTokens > 0 && lastFlushedBlocks.length > 0) {
+						const trailing: ParsedBlock[] = [];
+						let trailingTokens = 0;
+						for (let k = lastFlushedBlocks.length - 1; k >= 0; k--) {
+							const tb = lastFlushedBlocks[k]!;
+							const tbText = rawContent.slice(tb.range.startOffset, tb.range.endOffset);
+							const tbToks = estimateTokens(tbText);
+							if (trailingTokens + tbToks <= overlapTokens) {
+								trailing.unshift(tb);
+								trailingTokens += tbToks;
+							} else {
+								break;
+							}
+						}
+						if (trailing.length > 0 && trailing.length < lastFlushedBlocks.length) {
+							const comboStart = trailing[0]!.range.startOffset;
+							const comboEnd = block.range.endOffset;
+							if (estimateTokens(rawContent.slice(comboStart, comboEnd)) <= maxTokens) {
+								currentBlocks = [...trailing, block];
+								continue;
+							}
+						}
+					}
+
 					currentBlocks.push(block);
 				}
 			}
 		}
 
 		flushCurrent();
+	}
+
+	// Filter chunks with minTokens if specified (unless the document has no other content)
+	const minTokens = options?.minTokens;
+	if (minTokens !== undefined && minTokens > 0 && chunks.length > 1) {
+		const satisfying = chunks.filter((c) => c.tokenEstimate >= minTokens);
+		if (satisfying.length > 0) {
+			return satisfying;
+		}
 	}
 
 	return chunks;
