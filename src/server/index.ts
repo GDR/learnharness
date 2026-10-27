@@ -54,4 +54,6 @@ export * from "./sources.ts";
 export { createVaultRegistry, getVaultRegistry, setVaultRegistry } from "../store/vaults.ts";
 export { createSourceStore } from "../store/sources.ts";
 export { runLegacyMigration } from "./migration/legacy-migration.ts";
+// Document Inventory & Scanner (Milestone C Slice 1).
+export * from "./indexing/scanner.ts";
 
