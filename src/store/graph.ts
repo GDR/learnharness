@@ -52,6 +52,19 @@ import {
 	computeEvidenceDedupKey,
 	validateSourceEvidence,
 } from "../core/contracts/evidence.ts";
+import type {
+	ProjectGenerationRecord,
+	CommitGenerationParams,
+	CommitGenerationResult,
+	RecoveryReport,
+} from "../core/contracts/generation.ts";
+import {
+	getProjectGeneration,
+	executeGenerationCommit,
+	rollbackGraphGeneration,
+	recoverGraphStore,
+	recoverGraphStoreSync,
+} from "./graph-generation.ts";
 import type { GraphStore } from "../core/ports.ts";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -125,6 +138,13 @@ export function createGraphStore(graphDir: string = PATHS.graph): GraphStore {
 		} catch (err) {
 			console.warn(`[graph-store] could not purge legacy ledger ${file}:`, err);
 		}
+	}
+
+	// Milestone C Slice 6: Automatically recover consistency and initialize generation baseline on boot
+	try {
+		recoverGraphStoreSync(resolvedGraphDir);
+	} catch (err) {
+		console.warn(`[graph-store] auto-recovery warning on ${resolvedGraphDir}:`, err);
 	}
 
 	function appendLine<T>(file: string, record: T): void {
@@ -256,6 +276,7 @@ export function createGraphStore(graphDir: string = PATHS.graph): GraphStore {
 	function ensureEvidenceLoaded(): void {
 		if (evidenceLoaded) return;
 		evidenceLoaded = true;
+		rebuildEvidenceIndices([]);
 		if (!fs.existsSync(evidenceFile)) return;
 
 		const rawLines = readRawLines(evidenceFile);
@@ -458,6 +479,31 @@ export function createGraphStore(graphDir: string = PATHS.graph): GraphStore {
 				const body = next.evidence.map((record) => JSON.stringify(record)).join("\n") + (next.evidence.length > 0 ? "\n" : "");
 				writeAtomicFileSync(evidenceFile, body);
 			}
+		},
+
+		async getGeneration(): Promise<ProjectGenerationRecord> {
+			return getProjectGeneration(resolvedGraphDir);
+		},
+
+		async commitGeneration(params: CommitGenerationParams): Promise<CommitGenerationResult> {
+			const res = await executeGenerationCommit(resolvedGraphDir, params);
+			evidenceLoaded = false;
+			ensureEvidenceLoaded();
+			return res;
+		},
+
+		async rollbackGeneration(targetGeneration?: number): Promise<ProjectGenerationRecord> {
+			const res = await rollbackGraphGeneration(resolvedGraphDir, targetGeneration);
+			evidenceLoaded = false;
+			ensureEvidenceLoaded();
+			return res;
+		},
+
+		async recoverConsistency(): Promise<RecoveryReport> {
+			const report = await recoverGraphStore(resolvedGraphDir);
+			evidenceLoaded = false;
+			ensureEvidenceLoaded();
+			return report;
 		},
 
 	};

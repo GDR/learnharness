@@ -60,6 +60,8 @@ export * from "./indexing/scanner.ts";
 export * from "./indexing/queue.ts";
 // Graph Reconciliation Engine (Milestone C Slice 5).
 export * from "./indexing/reconciler.ts";
+// Generation Transaction Manager & Crash Recovery Engine (Milestone C Slice 6).
+export * from "../store/graph-generation.ts";
 // StudyScope Server Resolution (Milestone D Slice 1).
 export * from "./scope.ts";
 // Source-Aware Retrieval & Ranking (Milestone D Slice 2).

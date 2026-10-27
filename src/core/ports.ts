@@ -41,6 +41,12 @@ import type {
 } from "./contracts/project.ts";
 export type { MigrationCheckpoint };
 import type { SourceEvidence } from "./contracts/evidence.ts";
+import type {
+	ProjectGenerationRecord,
+	CommitGenerationParams,
+	CommitGenerationResult,
+	RecoveryReport,
+} from "./contracts/generation.ts";
 import type { StudyScope } from "./contracts/scope.ts";
 import type { UserSettings } from "./settings.ts";
 import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/local-agents.ts";
@@ -162,6 +168,27 @@ export interface GraphStore {
 		checkpoints?: SessionCheckpoint[];
 		evidence?: SourceEvidence[];
 	}): void;
+
+	/**
+	 * Retrieves the current authoritative project generation record.
+	 */
+	getGeneration?(): Promise<ProjectGenerationRecord>;
+
+	/**
+	 * Executes an atomic multi-ledger commit under project generation protocol.
+	 * Staged, validated against invariants, and swapped atomically.
+	 */
+	commitGeneration?(params: CommitGenerationParams): Promise<CommitGenerationResult>;
+
+	/**
+	 * Explicitly rolls back the graph ledgers to a specified previous generation (or generation - 1).
+	 */
+	rollbackGeneration?(targetGeneration?: number): Promise<ProjectGenerationRecord>;
+
+	/**
+	 * Verifies disk ledgers against generation.json and repairs any uncommitted partial writes.
+	 */
+	recoverConsistency?(): Promise<RecoveryReport>;
 }
 
 

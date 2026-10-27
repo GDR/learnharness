@@ -377,6 +377,7 @@ describe("Milestone C Slice 4: GraphStore SourceEvidence Ledger Storage", () => 
 		].join("\n") + "\n";
 
 		fs.writeFileSync(evidenceFile, corruptLines, "utf-8");
+		fs.rmSync(path.join(tempDir, "generation.json"), { force: true });
 
 		// Fresh store instance pointing to pre-existing corrupt file
 		const newStore = createGraphStore(tempDir);

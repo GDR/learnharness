@@ -100,6 +100,7 @@ export interface ReconciliationPlan {
 	orphanedPropositionIds: string[];
 	stillSupportedPropositionIds: string[];
 	dedupSkippedCount?: number;
+	baseGeneration?: number;
 }
 
 /**
@@ -112,6 +113,8 @@ export interface ReconciliationResult {
 	revisionId: string;
 	status: "applied" | "skipped" | "superseded" | "orphaned";
 	scenario: ReconciliationScenario;
+	generation?: number;
+	commitId?: string;
 	stats: {
 		evidenceAppended: number;
 		evidenceSuperseded: number;
