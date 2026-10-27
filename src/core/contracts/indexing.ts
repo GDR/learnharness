@@ -196,3 +196,195 @@ export function matchesGlob(
 
 	return false;
 }
+
+// ─── Indexing State Machine Contracts ────────────────────────────────────────
+
+export type IndexingState =
+	| "queued"
+	| "scanning"
+	| "extracting"
+	| "validating"
+	| "committing"
+	| "completed"
+	| "failed"
+	| "canceled";
+
+export const indexingStateSchema = z.enum([
+	"queued",
+	"scanning",
+	"extracting",
+	"validating",
+	"committing",
+	"completed",
+	"failed",
+	"canceled",
+]);
+
+export interface IndexingJobProgress {
+	current: number;
+	total: number;
+	processedDocuments?: number;
+	totalDocuments?: number;
+	percent?: number;
+	stage?: IndexingState;
+	currentStage?: string;
+	currentDocument?: string;
+}
+
+export const indexingJobProgressSchema = z.object({
+	current: z.number().int().nonnegative(),
+	total: z.number().int().nonnegative(),
+	processedDocuments: z.number().int().nonnegative().optional(),
+	totalDocuments: z.number().int().nonnegative().optional(),
+	percent: z.number().nonnegative().optional(),
+	stage: indexingStateSchema.optional(),
+	currentStage: z.string().optional(),
+	currentDocument: z.string().optional(),
+});
+
+export interface IndexingJobStats {
+	added: number;
+	modified: number;
+	unchanged: number;
+	removed: number;
+	extractedPropositions: number;
+	elapsedMs: number;
+	scannedCount?: number;
+	addedCount?: number;
+	modifiedCount?: number;
+	unchangedCount?: number;
+	removedCount?: number;
+	chunksCreated?: number;
+	evidenceCreated?: number;
+	durationMs?: number;
+}
+
+export const indexingJobStatsSchema = z.object({
+	added: z.number().int().nonnegative(),
+	modified: z.number().int().nonnegative(),
+	unchanged: z.number().int().nonnegative(),
+	removed: z.number().int().nonnegative(),
+	extractedPropositions: z.number().int().nonnegative(),
+	elapsedMs: z.number().nonnegative(),
+	scannedCount: z.number().int().nonnegative().optional(),
+	addedCount: z.number().int().nonnegative().optional(),
+	modifiedCount: z.number().int().nonnegative().optional(),
+	unchangedCount: z.number().int().nonnegative().optional(),
+	removedCount: z.number().int().nonnegative().optional(),
+	chunksCreated: z.number().int().nonnegative().optional(),
+	evidenceCreated: z.number().int().nonnegative().optional(),
+	durationMs: z.number().nonnegative().optional(),
+});
+
+export interface IndexingJob {
+	id: string;
+	projectId: string;
+	sourceId: string;
+	state: IndexingState;
+	progress: IndexingJobProgress;
+	stats: IndexingJobStats;
+	startedAt: string;
+	createdAt?: string;
+	updatedAt?: string;
+	completedAt?: string;
+	canceledAt?: string;
+	error?: string;
+}
+
+export const indexingJobSchema = z.object({
+	id: z.string().min(1, "job id cannot be empty"),
+	projectId: projectIdSchema,
+	sourceId: sourceIdSchema,
+	state: indexingStateSchema,
+	progress: indexingJobProgressSchema,
+	stats: indexingJobStatsSchema,
+	startedAt: z.string().min(1, "startedAt cannot be empty"),
+	createdAt: z.string().optional(),
+	updatedAt: z.string().optional(),
+	completedAt: z.string().optional(),
+	canceledAt: z.string().optional(),
+	error: z.string().optional(),
+});
+
+export function validateIndexingJob(data: unknown): IndexingJob {
+	return indexingJobSchema.parse(data);
+}
+
+// ─── Indexing Error Classes ──────────────────────────────────────────────────
+
+export class IndexingConflictError extends Error {
+	readonly status = 409;
+	readonly code = "INDEXING_CONFLICT";
+	readonly projectId: string;
+	readonly sourceId: string;
+	readonly activeJobId?: string;
+
+	constructor(projectId: string, sourceId: string, activeJobId?: string, message?: string) {
+		super(
+			message ??
+				`An indexing job (${activeJobId ?? "active"}) is already in progress for source "${sourceId}" in project "${projectId}".`,
+		);
+		this.name = "IndexingConflictError";
+		this.projectId = projectId;
+		this.sourceId = sourceId;
+		this.activeJobId = activeJobId;
+	}
+}
+
+export class IndexingJobNotFoundError extends Error {
+	readonly status = 404;
+	readonly code = "JOB_NOT_FOUND";
+	readonly jobId: string;
+
+	constructor(jobId: string, message?: string) {
+		super(message ?? `Indexing job not found: ${jobId}`);
+		this.name = "IndexingJobNotFoundError";
+		this.jobId = jobId;
+	}
+}
+
+export { IndexingJobNotFoundError as IndexingNotFoundError };
+
+// ─── API Request / Response Schemas ──────────────────────────────────────────
+
+export interface TriggerIndexingRequest {
+	forceRescan?: boolean;
+}
+
+export const triggerIndexingRequestSchema = z.object({
+	forceRescan: z.boolean().optional(),
+});
+
+export interface SourceIndexingStatusResponse {
+	activeJob: IndexingJob | null;
+	latestJob: IndexingJob | null;
+	recentJobs: IndexingJob[];
+}
+
+export const sourceIndexingStatusResponseSchema = z.object({
+	activeJob: indexingJobSchema.nullable(),
+	latestJob: indexingJobSchema.nullable(),
+	recentJobs: z.array(indexingJobSchema),
+});
+
+export interface ProjectIndexingStatusResponse {
+	activeJobs: IndexingJob[];
+	queuedJobs: IndexingJob[];
+	concurrency: {
+		activeCount: number;
+		queuedCount: number;
+		maxConcurrency: number;
+	};
+	recentJobs: IndexingJob[];
+}
+
+export const projectIndexingStatusResponseSchema = z.object({
+	activeJobs: z.array(indexingJobSchema),
+	queuedJobs: z.array(indexingJobSchema),
+	concurrency: z.object({
+		activeCount: z.number().int().nonnegative(),
+		queuedCount: z.number().int().nonnegative(),
+		maxConcurrency: z.number().int().positive(),
+	}),
+	recentJobs: z.array(indexingJobSchema),
+});
