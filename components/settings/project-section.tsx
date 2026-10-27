@@ -1,16 +1,33 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { Project, ProjectSettings } from "@/src/core";
+import type { Project, ProjectSettings, ProjectSource, Vault } from "@/src/core";
 import { SettingsSection, SettingsGroup, SettingsRow, ThinSelect, CommitInput } from "./controls.tsx";
+import { SourceSelector } from "./source-selector.tsx";
 import { notifyProjectChanged, useProjectChanged } from "@/components/settings-signal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-export function ProjectSection() {
-	const [projects, setProjects] = useState<Project[]>([]);
-	const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-	const [loading, setLoading] = useState(true);
+export interface ProjectSectionProps {
+	initialProjects?: Project[];
+	initialActiveProjectId?: string | null;
+	initialSources?: ProjectSource[];
+	initialVaults?: Vault[];
+}
+
+export function ProjectSection({
+	initialProjects,
+	initialActiveProjectId,
+	initialSources,
+	initialVaults,
+}: ProjectSectionProps = {}) {
+	const [projects, setProjects] = useState<Project[]>(initialProjects || []);
+	const [activeProjectId, setActiveProjectId] = useState<string | null>(
+		initialActiveProjectId !== undefined
+			? initialActiveProjectId
+			: (initialProjects?.[0]?.id ?? null),
+	);
+	const [loading, setLoading] = useState(initialProjects === undefined);
 	const [error, setError] = useState<string | null>(null);
 
 	// Create project draft
@@ -34,8 +51,10 @@ export function ProjectSection() {
 	}, []);
 
 	useEffect(() => {
-		void loadProjects();
-	}, [loadProjects]);
+		if (initialProjects === undefined) {
+			void loadProjects();
+		}
+	}, [loadProjects, initialProjects]);
 
 	useProjectChanged(() => {
 		void loadProjects();
@@ -223,6 +242,12 @@ export function ProjectSection() {
 							<option value="assisted">Assisted (Knowledge Fallback)</option>
 						</ThinSelect>
 					</SettingsRow>
+
+					<SourceSelector
+						projectId={activeProject.id}
+						initialSources={initialSources}
+						initialVaults={initialVaults}
+					/>
 				</SettingsGroup>
 			)}
 
