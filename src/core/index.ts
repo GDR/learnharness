@@ -84,3 +84,5 @@ export * from "./coverage.ts";
 export * from "./session-markdown.ts";
 // Project validation and audit lock (Milestone A). Pure, browser-safe.
 export * from "./audit-lock.ts";
+// Obsidian Markdown AST and Feature Parser (Milestone B). Pure, browser-safe.
+export * from "./obsidian/parser.ts";

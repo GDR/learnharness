@@ -15,3 +15,4 @@ export * from "./models.ts";
 export * from "./local-agents.ts";
 export * from "./subscriptions.ts";
 export * from "./chatgpt.ts";
+export * from "./obsidian.ts";
