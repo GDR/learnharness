@@ -198,11 +198,13 @@ jobs:
         run: |
           extra_args=()
           if [[ -z "${CSC_LINK:-}" ]]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
             export CSC_IDENTITY_AUTO_DISCOVERY="false"
           else
             extra_args+=("-c.forceCodeSigning=true")
           fi
           if [[ -z "${APPLE_ID:-}" || -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" || -z "${APPLE_TEAM_ID:-}" ]]; then
+            unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
             extra_args+=("-c.mac.notarize=false")
           fi
           npx electron-builder ${{ matrix.builder_args }} --publish always "${extra_args[@]}"
