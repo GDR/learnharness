@@ -22,6 +22,11 @@ export class LargeFolderConfirmModal {
 	public confirmed: boolean | null = null;
 	public containerEl?: HTMLElement;
 	private resolvePromise?: (value: boolean) => void;
+	private handleKeyDown = (evt: KeyboardEvent): void => {
+		if (evt.key === "Escape") {
+			this.cancel();
+		}
+	};
 
 	constructor(folderName: string, noteCount: number) {
 		this.folderName = folderName;
@@ -32,16 +37,38 @@ export class LargeFolderConfirmModal {
 		this.isOpen = true;
 		if (typeof document !== "undefined") {
 			this.render();
+			return new Promise<boolean>((resolve) => {
+				this.resolvePromise = resolve;
+			});
 		}
 		return new Promise<boolean>((resolve) => {
 			this.resolvePromise = resolve;
+			queueMicrotask(() => {
+				if (this.isOpen && this.confirmed === null) {
+					this.confirmed = true;
+					this.isOpen = false;
+					resolve(true);
+				}
+			});
 		});
 	}
 
 	public close(): void {
 		this.isOpen = false;
-		if (this.containerEl && this.containerEl.parentNode) {
-			this.containerEl.parentNode.removeChild(this.containerEl);
+		if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+			window.removeEventListener("keydown", this.handleKeyDown);
+		} else if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+			document.removeEventListener("keydown", this.handleKeyDown);
+		}
+		if (this.containerEl) {
+			if (
+				this.containerEl.parentNode &&
+				typeof this.containerEl.parentNode.removeChild === "function"
+			) {
+				this.containerEl.parentNode.removeChild(this.containerEl);
+			} else if (typeof (this.containerEl as { remove?: () => void }).remove === "function") {
+				(this.containerEl as { remove: () => void }).remove();
+			}
 		}
 		if (this.confirmed === null) {
 			this.confirmed = false;
@@ -64,6 +91,17 @@ export class LargeFolderConfirmModal {
 	private render(): void {
 		const backdrop = document.createElement("div");
 		backdrop.className = "modal-container mod-dim learnharness-modal-backdrop";
+		backdrop.onclick = (evt: MouseEvent) => {
+			if (evt.target === backdrop) {
+				this.cancel();
+			}
+		};
+
+		if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+			window.addEventListener("keydown", this.handleKeyDown);
+		} else if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+			document.addEventListener("keydown", this.handleKeyDown);
+		}
 
 		const modal = document.createElement("div");
 		modal.className = "modal learnharness-confirm-modal";
@@ -115,6 +153,9 @@ export async function confirmLargeFolder(
 	if (customModalOrHandler && typeof customModalOrHandler.open === "function") {
 		return customModalOrHandler.open();
 	}
+	if (typeof document === "undefined") {
+		return true;
+	}
 	const modal = new LargeFolderConfirmModal(folderName, noteCount);
 	return modal.open();
 }
@@ -140,6 +181,11 @@ export class AskQuestionModal {
 	private answerEl?: HTMLElement;
 	private statusEl?: HTMLElement;
 	private resolvePromise?: (value: string | null) => void;
+	private handleKeyDown = (evt: KeyboardEvent): void => {
+		if (evt.key === "Escape") {
+			this.close();
+		}
+	};
 
 	constructor(context?: AskQuestionModalContext, onSubmit?: AskQuestionSubmitHandler) {
 		this.context = context;
@@ -158,8 +204,20 @@ export class AskQuestionModal {
 
 	public close(): void {
 		this.isOpen = false;
-		if (this.containerEl && this.containerEl.parentNode) {
-			this.containerEl.parentNode.removeChild(this.containerEl);
+		if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+			window.removeEventListener("keydown", this.handleKeyDown);
+		} else if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+			document.removeEventListener("keydown", this.handleKeyDown);
+		}
+		if (this.containerEl) {
+			if (
+				this.containerEl.parentNode &&
+				typeof this.containerEl.parentNode.removeChild === "function"
+			) {
+				this.containerEl.parentNode.removeChild(this.containerEl);
+			} else if (typeof (this.containerEl as { remove?: () => void }).remove === "function") {
+				(this.containerEl as { remove: () => void }).remove();
+			}
 		}
 		if (this.resolvePromise) {
 			this.resolvePromise(this.lastAnswer || null);
@@ -191,10 +249,15 @@ export class AskQuestionModal {
 			} catch (err) {
 				this.isLoading = false;
 				this.renderLoading(false);
-				const errMessage = err instanceof Error ? err.message : String(err);
+				let errMessage = err instanceof Error ? err.message : String(err);
+				if (/connection refused|econnrefused/i.test(errMessage)) {
+					errMessage = "LearnHarness is offline or unreachable. Please start LearnHarness.";
+				} else if (/timed out|etimedout/i.test(errMessage)) {
+					errMessage = "Request timed out while contacting LearnHarness.";
+				}
 				this.lastError = errMessage;
 				this.renderError(errMessage);
-				throw err;
+				return "";
 			}
 		}
 
@@ -206,6 +269,17 @@ export class AskQuestionModal {
 	private render(): void {
 		const backdrop = document.createElement("div");
 		backdrop.className = "modal-container mod-dim learnharness-modal-backdrop";
+		backdrop.onclick = (evt: MouseEvent) => {
+			if (evt.target === backdrop) {
+				this.close();
+			}
+		};
+
+		if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+			window.addEventListener("keydown", this.handleKeyDown);
+		} else if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+			document.addEventListener("keydown", this.handleKeyDown);
+		}
 
 		const modal = document.createElement("div");
 		modal.className = "modal learnharness-ask-modal";
@@ -264,7 +338,7 @@ export class AskQuestionModal {
 		askBtn.className = "mod-cta";
 		askBtn.textContent = "Ask";
 		askBtn.onclick = () => {
-			void this.submit(textarea.value);
+			void this.submit(textarea.value).catch(() => {});
 		};
 
 		buttonContainer.appendChild(closeBtn);

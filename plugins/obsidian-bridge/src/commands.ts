@@ -113,6 +113,7 @@ export function collectMarkdownFiles(folder: ObsidianTFolder): string[] {
 
 export async function executeStudyCurrentNote(
 	plugin: LearnHarnessBridgePlugin,
+	targetFile?: ObsidianTFile | null,
 ): Promise<StudySessionResponse | null> {
 	if (!plugin.settings.activeProjectId?.trim()) {
 		showNotice(
@@ -122,7 +123,7 @@ export async function executeStudyCurrentNote(
 		return null;
 	}
 
-	const activeFile = plugin.app?.workspace?.getActiveFile?.();
+	const activeFile = targetFile ?? plugin.app?.workspace?.getActiveFile?.();
 	if (!activeFile) {
 		showNotice(plugin, "LearnHarness: No active markdown note open.");
 		return null;
@@ -182,18 +183,23 @@ export async function executeStudySelection(
 		view?.editor ??
 		(plugin.app?.workspace?.getActiveViewOfType?.("markdown") as ObsidianMarkdownView | null)?.editor;
 
+	const activeFile = view?.file ?? plugin.app?.workspace?.getActiveFile?.();
+
 	if (!targetEditor) {
+		if (activeFile) {
+			showNotice(plugin, "LearnHarness: No selection found — studying current note");
+			return executeStudyCurrentNote(plugin, activeFile);
+		}
 		showNotice(plugin, "LearnHarness: No active editor found.");
 		return null;
 	}
 
 	const selection = targetEditor.getSelection?.()?.trim();
 	if (!selection) {
-		showNotice(plugin, "LearnHarness: No text selected to study.");
-		return null;
+		showNotice(plugin, "LearnHarness: No selection found — studying current note");
+		return executeStudyCurrentNote(plugin, activeFile);
 	}
 
-	const activeFile = view?.file ?? plugin.app?.workspace?.getActiveFile?.();
 	const filePath = activeFile?.path ?? "Untitled.md";
 	const vaultName = plugin.app?.vault?.getName?.() || "DefaultVault";
 

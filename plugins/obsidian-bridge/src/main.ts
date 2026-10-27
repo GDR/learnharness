@@ -20,7 +20,6 @@ import {
 	executeStudySelection,
 	executeStudyFolder,
 	executeAskLearnHarness,
-	handleBridgeError,
 } from "./commands.ts";
 
 export class LearnHarnessBridgePlugin {
@@ -32,6 +31,7 @@ export class LearnHarnessBridgePlugin {
 	public commands: Map<string, ObsidianCommand> = new Map();
 	public eventRefs: ObsidianEventRef[] = [];
 	public lastNotice?: string;
+	public notices: string[] = [];
 	public isLoaded = false;
 
 	constructor(app?: ObsidianApp, manifest?: Partial<PluginManifest>) {
@@ -53,6 +53,7 @@ export class LearnHarnessBridgePlugin {
 
 	public showNotice(message: string, durationMs?: number): void {
 		this.lastNotice = message;
+		this.notices.push(message);
 		const globalNotice = (globalThis as unknown as {
 			Notice?: new (msg: string, dur?: number) => unknown;
 		}).Notice;
@@ -83,9 +84,9 @@ export class LearnHarnessBridgePlugin {
 						`LearnHarness: ${health.ok ? "Connected" : "Disconnected"}`,
 					);
 					return health;
-				} catch (err) {
+				} catch {
 					this.statusBarItem?.setText("LearnHarness: Error");
-					throw err;
+					this.showNotice("LearnHarness: Offline or unreachable");
 				}
 			},
 		});
@@ -116,9 +117,12 @@ export class LearnHarnessBridgePlugin {
 					| ObsidianMarkdownView
 					| null
 					| undefined;
-				const selection = view?.editor?.getSelection?.()?.trim();
+				const activeFile = view?.file ?? this.app?.workspace?.getActiveFile?.();
+				const isMd =
+					(activeFile?.extension && activeFile.extension.toLowerCase() === "md") ||
+					(activeFile?.name && activeFile.name.toLowerCase().endsWith(".md"));
 				if (checking) {
-					return !!selection;
+					return !!(view || isMd);
 				}
 				if (view?.editor) {
 					void executeStudySelection(this, view.editor, view);
@@ -157,7 +161,7 @@ export class LearnHarnessBridgePlugin {
 							item.setTitle("LearnHarness: Study folder");
 							item.setIcon("folder");
 							item.onClick(() => {
-								void executeStudyFolder(this, file as ObsidianTFolder);
+								return executeStudyFolder(this, file as ObsidianTFolder);
 							});
 						});
 					} else {
@@ -169,35 +173,8 @@ export class LearnHarnessBridgePlugin {
 							menu.addItem((item: ObsidianMenuItem) => {
 								item.setTitle("LearnHarness: Study note");
 								item.setIcon("document");
-								item.onClick(async () => {
-									if (!this.settings.activeProjectId?.trim()) {
-										this.showNotice(
-											"LearnHarness: No project selected. Please configure an active project in settings.",
-										);
-										return;
-									}
-									const vaultName = this.app?.vault?.getName?.() || "DefaultVault";
-									let content = "";
-									if (this.app?.vault?.read) {
-										try {
-											content = await this.app.vault.read(file as ObsidianTFile);
-										} catch (err) {
-											handleBridgeError(this, err, "reading note");
-											return;
-										}
-									}
-									try {
-										await this.transport.postStudyNote({
-											vaultName,
-											filePath: file.path,
-											content,
-										});
-										this.showNotice(
-											`LearnHarness: Started study session for "${(file as ObsidianTFile).basename || file.name}"`,
-										);
-									} catch (err) {
-										handleBridgeError(this, err, "study note");
-									}
+								item.onClick(() => {
+									return executeStudyCurrentNote(this, file as ObsidianTFile);
 								});
 							});
 						}
@@ -220,7 +197,7 @@ export class LearnHarnessBridgePlugin {
 						item.setTitle("LearnHarness: Study selection");
 						item.setIcon("text-select");
 						item.onClick(() => {
-							void executeStudySelection(this, editor, view);
+							return executeStudySelection(this, editor, view);
 						});
 					});
 
@@ -228,7 +205,7 @@ export class LearnHarnessBridgePlugin {
 						item.setTitle("LearnHarness: Ask LearnHarness about selection");
 						item.setIcon("help-circle");
 						item.onClick(() => {
-							void executeAskLearnHarness(this, { editor, view });
+							return executeAskLearnHarness(this, { editor, view });
 						});
 					});
 				},

@@ -161,8 +161,8 @@ export class MockMenuItem implements ObsidianMenuItem {
 		return this;
 	}
 
-	triggerClick(): void {
-		this.clickHandler?.({ type: "click" } as unknown as MouseEvent);
+	triggerClick(): unknown {
+		return this.clickHandler?.({ type: "click" } as unknown as MouseEvent);
 	}
 }
 
@@ -351,7 +351,7 @@ describe("Contextual Commands Suite", () => {
 			assert.equal(cmd.checkCallback(true), true);
 		});
 
-		it("study-selection checkCallback returns true only when text is selected", async () => {
+		it("study-selection checkCallback returns true when note view is active even without selection", async () => {
 			const app = new MockApp();
 			const plugin = createTestPlugin(app);
 			await plugin.onload();
@@ -359,14 +359,15 @@ describe("Contextual Commands Suite", () => {
 			const cmd = plugin.commands.get("learnharness:study-selection")!;
 			assert.ok(cmd.checkCallback);
 
-			// Case A: No active view
+			// Case A: No active view and no active file
 			app.workspace.activeView = null;
+			app.workspace.activeFile = null;
 			assert.equal(cmd.checkCallback(true), false);
 
-			// Case B: Active view with empty selection
+			// Case B: Active view with empty selection (accessible via note fallback)
 			const editor = new MockEditor("All note text", "");
 			app.workspace.activeView = new MockMarkdownView(new MockTFile("Test.md"), editor);
-			assert.equal(cmd.checkCallback(true), false);
+			assert.equal(cmd.checkCallback(true), true);
 
 			// Case C: Active view with non-empty selection
 			editor.setSelection("selected passage");
@@ -468,23 +469,34 @@ describe("Contextual Commands Suite", () => {
 			assert.equal(plugin.lastNotice, "LearnHarness: Started study session for selected text");
 		});
 
-		it("shows notice when selection is empty", async () => {
-			const app = new MockApp();
-			const editor = new MockEditor("Some content", "   ");
-			const view = new MockMarkdownView(new MockTFile("Test.md"), editor);
+		it("falls back to studying active note when selection is empty or whitespace", async () => {
+			const app = new MockApp("NeuroscienceVault");
+			const noteFile = new MockTFile("Test.md", "Full content of test note.");
+			app.vault.addFile(noteFile);
+			const editor = new MockEditor(noteFile.content, "   ");
+			const view = new MockMarkdownView(noteFile, editor);
+			app.workspace.activeView = view;
+			app.workspace.activeFile = noteFile;
 
 			const plugin = createTestPlugin(app);
 			lastRequestBody = null;
 
 			const result = await executeStudySelection(plugin, editor, view);
-			assert.equal(result, null);
-			assert.equal(lastRequestBody, null);
-			assert.equal(plugin.lastNotice, "LearnHarness: No text selected to study.");
+			assert.ok(result);
+			assert.equal(result.sessionId, "sess_created_987");
+			const requestBody = lastRequestBody as Record<string, unknown> | null;
+			assert.equal(requestBody?.filePath, "Test.md");
+			assert.equal(requestBody?.selection, undefined);
+			assert.ok(
+				plugin.notices.includes("LearnHarness: No selection found — studying current note"),
+			);
+			assert.equal(plugin.lastNotice, 'LearnHarness: Started study session for "Test"');
 		});
 
-		it("shows notice when no editor is found", async () => {
+		it("shows notice when no editor and no active file is found", async () => {
 			const app = new MockApp();
 			app.workspace.activeView = null;
+			app.workspace.activeFile = null;
 			const plugin = createTestPlugin(app);
 
 			const result = await executeStudySelection(plugin);
@@ -700,6 +712,118 @@ describe("Contextual Commands Suite", () => {
 			});
 			assert.equal(modal.lastAnswer, "Monosynaptic spinal reflex arc.");
 		});
+
+		it("confirmLargeFolder safe headless fallback resolves cleanly without hanging", async () => {
+			const res = await confirmLargeFolder("LargeTopic", 75);
+			assert.equal(res, true);
+		});
+
+		it("LargeFolderConfirmModal.open() resolves true via fallback in headless environment", async () => {
+			const modal = new LargeFolderConfirmModal("LargeTopic", 80);
+			const res = await modal.open();
+			assert.equal(res, true);
+			assert.equal(modal.isOpen, false);
+		});
+
+		it("AskQuestionModal submit handles submission failure cleanly without unhandled rejection", async () => {
+			const modal = new AskQuestionModal(
+				{ filePath: "Reflexes.md" },
+				async () => {
+					throw new Error("connect ECONNREFUSED 127.0.0.1:3000");
+				},
+			);
+
+			const answer = await modal.submit("Why did it fail?");
+			assert.equal(answer, "");
+			assert.equal(
+				modal.lastError,
+				"LearnHarness is offline or unreachable. Please start LearnHarness.",
+			);
+			assert.equal(modal.isLoading, false);
+		});
+
+		it("modals dismiss on backdrop click and Escape key", async () => {
+			const eventListeners: Record<string, ((e: unknown) => void)[]> = {};
+			const mockWindow = {
+				addEventListener: (event: string, cb: (e: unknown) => void) => {
+					eventListeners[event] = eventListeners[event] || [];
+					eventListeners[event].push(cb);
+				},
+				removeEventListener: (event: string, cb: (e: unknown) => void) => {
+					if (eventListeners[event]) {
+						eventListeners[event] = eventListeners[event].filter((f) => f !== cb);
+					}
+				},
+			};
+
+			const createdElements: Array<{
+				className: string;
+				onclick?: (e: unknown) => void;
+				parentNode?: unknown;
+			}> = [];
+			const mockBody = {
+				appendChild: (child: unknown) => {
+					(child as { parentNode?: unknown }).parentNode = mockBody;
+				},
+				removeChild: (_child: unknown) => {},
+			};
+
+			const mockDocument = {
+				createElement: (tag: string) => {
+					const el = {
+						tag,
+						className: "",
+						textContent: "",
+						style: {} as Record<string, string>,
+						parentNode: null as unknown,
+						onclick: undefined as ((e: unknown) => void) | undefined,
+						appendChild: () => {},
+					};
+					createdElements.push(el);
+					return el;
+				},
+				body: mockBody,
+			};
+
+			const prevDoc = (globalThis as unknown as { document?: unknown }).document;
+			const prevWin = (globalThis as unknown as { window?: unknown }).window;
+			(globalThis as unknown as { document: unknown }).document = mockDocument;
+			(globalThis as unknown as { window: unknown }).window = mockWindow;
+
+			try {
+				// 1. LargeFolderConfirmModal backdrop click dismiss
+				const confirmModal = new LargeFolderConfirmModal("BigFolder", 100);
+				const confirmPromise = confirmModal.open();
+				assert.equal(confirmModal.isOpen, true);
+
+				const backdropEl = createdElements.find((el) =>
+					el.className.includes("learnharness-modal-backdrop"),
+				);
+				assert.ok(backdropEl?.onclick);
+				// Click backdrop
+				backdropEl.onclick({ target: backdropEl });
+				const confirmRes = await confirmPromise;
+				assert.equal(confirmRes, false);
+				assert.equal(confirmModal.isOpen, false);
+
+				// 2. AskQuestionModal Escape key dismiss
+				const askModal = new AskQuestionModal({ filePath: "Test.md" });
+				const askPromise = askModal.open();
+				assert.equal(askModal.isOpen, true);
+
+				// Fire Escape keydown
+				const keydownListeners = eventListeners["keydown"] || [];
+				for (const listener of keydownListeners) {
+					listener({ key: "Escape" });
+				}
+				const askRes = await askPromise;
+				assert.equal(askRes, null);
+				assert.equal(askModal.isOpen, false);
+			} finally {
+				(globalThis as unknown as { document: unknown }).document = prevDoc;
+				(globalThis as unknown as { window: unknown }).window = prevWin;
+			}
+		});
 	});
 
 	/* ---------------------------------------------------------------------- */
@@ -724,9 +848,7 @@ describe("Contextual Commands Suite", () => {
 			assert.equal(item.title, "LearnHarness: Study folder");
 
 			// Trigger click
-			item.triggerClick();
-			// Allow microtasks to complete
-			await new Promise((r) => setTimeout(r, 20));
+			await item.triggerClick();
 
 			assert.equal(lastRequestUrl, "/api/projects/proj_neuro_42/study-sessions");
 			assert.equal(lastRequestBody?.folderPath, "Vault/Psychology");
@@ -748,8 +870,7 @@ describe("Contextual Commands Suite", () => {
 			assert.ok(item);
 			assert.equal(item.title, "LearnHarness: Study note");
 
-			item.triggerClick();
-			await new Promise((r) => setTimeout(r, 20));
+			await item.triggerClick();
 
 			assert.equal(lastRequestUrl, "/api/projects/proj_neuro_42/study-sessions");
 			assert.equal(lastRequestBody?.filePath, "Vault/Dopamine.md");
