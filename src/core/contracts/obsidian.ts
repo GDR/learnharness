@@ -218,3 +218,113 @@ export const parsedObsidianDocumentSchema = z.object({
 export function validateParsedObsidianDocument(raw: unknown): ParsedObsidianDocument {
 	return parsedObsidianDocumentSchema.parse(raw);
 }
+
+// ─── Deep-Links ──────────────────────────────────────────────────────────────
+
+export interface ObsidianDeepLinkOptions {
+	vaultName: string;
+	filePath: string;
+	heading?: string;
+	blockId?: string;
+}
+
+export const obsidianDeepLinkOptionsSchema = z.object({
+	vaultName: z.string().min(1, "vaultName cannot be empty"),
+	filePath: z.string().min(1, "filePath cannot be empty"),
+	heading: z.string().optional(),
+	blockId: z.string().optional(),
+});
+
+export function validateObsidianDeepLinkOptions(raw: unknown): ObsidianDeepLinkOptions {
+	return obsidianDeepLinkOptionsSchema.parse(raw);
+}
+
+// ─── Wiki-Link Resolution ───────────────────────────────────────────────────
+
+export type WikiLinkResolutionSubpathType = "heading" | "block";
+
+export const wikiLinkResolutionSubpathTypeSchema = z.enum(["heading", "block"]);
+
+export interface WikiLinkResolutionSubpath {
+	type: WikiLinkResolutionSubpathType;
+	value: string;
+}
+
+export const wikiLinkResolutionSubpathSchema = z.object({
+	type: wikiLinkResolutionSubpathTypeSchema,
+	value: z.string(),
+});
+
+export type WikiLinkResolutionStatus = "resolved" | "ambiguous" | "unresolved";
+
+export const wikiLinkResolutionStatusSchema = z.enum(["resolved", "ambiguous", "unresolved"]);
+
+export interface WikiLinkResolution {
+	target: string;
+	resolvedPath?: string;
+	subpath?: {
+		type: "heading" | "block";
+		value: string;
+	};
+	status: "resolved" | "ambiguous" | "unresolved";
+	candidates?: string[];
+}
+
+export const wikiLinkResolutionSchema = z.object({
+	target: z.string(),
+	resolvedPath: z.string().optional(),
+	subpath: wikiLinkResolutionSubpathSchema.optional(),
+	status: wikiLinkResolutionStatusSchema,
+	candidates: z.array(z.string()).optional(),
+});
+
+export function validateWikiLinkResolution(raw: unknown): WikiLinkResolution {
+	return wikiLinkResolutionSchema.parse(raw);
+}
+
+// ─── Backlinks Indexing ─────────────────────────────────────────────────────
+
+export interface BacklinkReference {
+	sourceFilePath: string;
+	targetPath: string;
+	wikiLinkText: string;
+	alias?: string;
+	subpath?: string;
+	range: TextRange;
+	contextSnippet: string;
+}
+
+export const backlinkReferenceSchema = z.object({
+	sourceFilePath: z.string().min(1, "sourceFilePath cannot be empty"),
+	targetPath: z.string().min(1, "targetPath cannot be empty"),
+	wikiLinkText: z.string(),
+	alias: z.string().optional(),
+	subpath: z.string().optional(),
+	range: textRangeSchema,
+	contextSnippet: z.string(),
+});
+
+export function validateBacklinkReference(raw: unknown): BacklinkReference {
+	return backlinkReferenceSchema.parse(raw);
+}
+
+// ─── Rename Refactoring ─────────────────────────────────────────────────────
+
+export interface RenameRefactorResult {
+	filePath: string;
+	originalContent: string;
+	updatedContent: string;
+	replacementsCount: number;
+}
+
+export const renameRefactorResultSchema = z.object({
+	filePath: z.string().min(1, "filePath cannot be empty"),
+	originalContent: z.string(),
+	updatedContent: z.string(),
+	replacementsCount: z.number().int().nonnegative(),
+});
+
+export function validateRenameRefactorResult(raw: unknown): RenameRefactorResult {
+	return renameRefactorResultSchema.parse(raw);
+}
+

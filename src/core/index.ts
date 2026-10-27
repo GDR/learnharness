@@ -86,3 +86,6 @@ export * from "./session-markdown.ts";
 export * from "./audit-lock.ts";
 // Obsidian Markdown AST and Feature Parser (Milestone B). Pure, browser-safe.
 export * from "./obsidian/parser.ts";
+// Obsidian Deep-Links, Wiki-Link Resolution, Backlinks & Rename Refactoring (Milestone B). Pure, browser-safe.
+export * from "./obsidian/deeplink.ts";
+
