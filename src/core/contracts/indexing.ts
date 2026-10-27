@@ -175,7 +175,7 @@ export function matchesGlob(
 			const part = parts[p];
 			if (!part) continue;
 			cumulative += (p > 0 ? "/" : "") + part;
-			if (globToRegex(pattern).test(cumulative) || globToRegex(pattern).test(cumulative + "/any")) {
+			if (rx.test(cumulative) || rx.test(cumulative + "/")) {
 				return false;
 			}
 		}

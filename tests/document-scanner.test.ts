@@ -70,6 +70,13 @@ test("Milestone C Slice 1: Document Inventory & Change Scanner", async (t) => {
 		// Non-recursive glob
 		assert.equal(matchesGlob("root.md", ["*.md"]), true);
 		assert.equal(matchesGlob("nested/sub.md", ["*.md"]), false);
+
+		// Exclude globs targeting names with "any" or "dummy.md" do not falsely exclude valid siblings
+		assert.equal(matchesGlob("notes/guide.md", ["**/*.md"], ["notes/any"]), true);
+		assert.equal(matchesGlob("notes/any/secret.md", ["**/*.md"], ["notes/any"]), false);
+		assert.equal(matchesGlob("notes/guide.md", ["**/*.md"], ["*/any"]), true);
+		assert.equal(matchesGlob("notes/guide.md", ["**/*.md"], ["notes/dummy.md"]), true);
+		assert.equal(matchesGlob("notes/dummy.md", ["**/*.md"], ["notes/dummy.md"]), false);
 	});
 
 	await t.test("scans fresh vault, computes SHA-256 hashes and persists inventory", async () => {
@@ -493,6 +500,166 @@ test("Milestone C Slice 1: Document Inventory & Change Scanner", async (t) => {
 			assert.equal(conflictRes.status, 409);
 			const conflictData = await conflictRes.json();
 			assert.equal(conflictData.code, "VAULT_UNAVAILABLE");
+		} finally {
+			teardown();
+		}
+	});
+
+	await t.test("disconnected vault safety: unavailable binding with existing directory throws and preserves inventory", async () => {
+		setup();
+		try {
+			const pStore = createProjectStore(tmpDir);
+			await pStore.createProject({ id: "proj_disc_exist", name: "Disc Exist Project" });
+
+			const vRegistry = createVaultRegistry(tmpDir);
+			const vault = await vRegistry.registerVault({
+				id: "vault_disc_exist",
+				displayName: "Disc Exist Vault",
+				kind: "obsidian",
+				bindings: [{ deviceId: "local", rootPath: vaultFolder, status: "available" }],
+			});
+
+			fs.writeFileSync(path.join(vaultFolder, "Precious.md"), "Critical student notes");
+
+			const ctx = await (await import("../src/server/projects.ts")).resolveProjectContext("proj_disc_exist", { dataDir: tmpDir });
+			await ctx.sources.addSource({
+				id: "src_disc_exist",
+				projectId: "proj_disc_exist",
+				vaultId: "vault_disc_exist",
+			});
+
+			// Initial scan creates active document
+			const initial = await scanSourceDocuments({
+				projectId: "proj_disc_exist",
+				sourceId: "src_disc_exist",
+				dataDir: tmpDir,
+			});
+			assert.equal(initial.addedCount, 1);
+			assert.equal(initial.documents[0]?.status, "active");
+
+			// Simulate unmounted drive: create an empty mount directory on disk, but binding status is "unavailable"
+			const emptyMountDir = path.join(tmpDir, "empty_mount_point");
+			fs.mkdirSync(emptyMountDir, { recursive: true });
+
+			await vRegistry.updateBinding(vault.id, {
+				deviceId: "local",
+				rootPath: emptyMountDir,
+				status: "unavailable",
+			});
+
+			// Scan MUST throw VaultUnavailableError despite emptyMountDir existing on disk
+			await assert.rejects(
+				async () => {
+					await scanSourceDocuments({
+						projectId: "proj_disc_exist",
+						sourceId: "src_disc_exist",
+						dataDir: tmpDir,
+					});
+				},
+				(err: unknown) => {
+					assert.ok(err instanceof VaultUnavailableError);
+					assert.equal(err.status, 409);
+					assert.equal(err.code, "VAULT_UNAVAILABLE");
+					return true;
+				},
+			);
+
+			// Core Invariant 4: Existing inventory MUST still be intact and NOT flipped to missing
+			const savedInventory = await loadSourceInventory("proj_disc_exist", "src_disc_exist", tmpDir);
+			assert.equal(Object.keys(savedInventory).length, 1);
+			const preciousDoc = Object.values(savedInventory)[0];
+			assert.ok(preciousDoc);
+			assert.equal(preciousDoc.status, "active");
+			assert.equal(preciousDoc.currentPath, "Precious.md");
+		} finally {
+			teardown();
+		}
+	});
+
+	await t.test("scanner with exclude globs containing any or dummy.md preserves valid siblings", async () => {
+		setup();
+		try {
+			const pStore = createProjectStore(tmpDir);
+			await pStore.createProject({ id: "proj_glob", name: "Glob Project" });
+
+			const vRegistry = createVaultRegistry(tmpDir);
+			await vRegistry.registerVault({
+				id: "vault_glob",
+				displayName: "Glob Vault",
+				kind: "obsidian",
+				bindings: [{ deviceId: "local", rootPath: vaultFolder, status: "available" }],
+			});
+
+			// Create directory structure:
+			// vault/notes/guide.md
+			// vault/notes/dummy.md
+			// vault/notes/any/child.md
+			const notesDir = path.join(vaultFolder, "notes");
+			const anyDir = path.join(notesDir, "any");
+			fs.mkdirSync(anyDir, { recursive: true });
+			fs.writeFileSync(path.join(notesDir, "guide.md"), "# Guide\nValid note.");
+			fs.writeFileSync(path.join(notesDir, "dummy.md"), "# Dummy\nExcluded note.");
+			fs.writeFileSync(path.join(anyDir, "child.md"), "# Child\nExcluded note.");
+
+			const ctx = await (await import("../src/server/projects.ts")).resolveProjectContext("proj_glob", { dataDir: tmpDir });
+			await ctx.sources.addSource({
+				id: "src_glob",
+				projectId: "proj_glob",
+				vaultId: "vault_glob",
+				exclude: [".obsidian/**", ".trash/**", ".git/**", "node_modules/**", "notes/dummy.md", "notes/any/**"],
+			});
+
+			const scanRes = await scanSourceDocuments({
+				projectId: "proj_glob",
+				sourceId: "src_glob",
+				dataDir: tmpDir,
+			});
+
+			// Only notes/guide.md should be scanned
+			assert.equal(scanRes.scannedCount, 1);
+			assert.equal(scanRes.addedCount, 1);
+			assert.equal(scanRes.documents.length, 1);
+			assert.equal(scanRes.documents[0]?.currentPath, "notes/guide.md");
+		} finally {
+			teardown();
+		}
+	});
+
+	await t.test("source store batch upsertDocuments updates records in single transaction", async () => {
+		setup();
+		try {
+			const pStore = createProjectStore(tmpDir);
+			await pStore.createProject({ id: "proj_batch", name: "Batch Project" });
+			const ctx = await (await import("../src/server/projects.ts")).resolveProjectContext("proj_batch", { dataDir: tmpDir });
+
+			assert.ok(typeof ctx.sources.upsertDocuments === "function");
+			await ctx.sources.upsertDocuments([
+				{
+					id: "doc_1",
+					sourceId: "src_1",
+					vaultId: "v1",
+					currentPath: "a.md",
+					contentHash: "h1",
+					revisionId: "r1",
+					status: "active",
+					sizeBytes: 10,
+				},
+				{
+					id: "doc_2",
+					sourceId: "src_1",
+					vaultId: "v1",
+					currentPath: "b.md",
+					contentHash: "h2",
+					revisionId: "r2",
+					status: "active",
+					sizeBytes: 20,
+				},
+			]);
+
+			const docs = await ctx.sources.listDocuments("src_1");
+			assert.equal(docs.length, 2);
+			assert.ok(docs.some((d) => d.id === "doc_1"));
+			assert.ok(docs.some((d) => d.id === "doc_2"));
 		} finally {
 			teardown();
 		}

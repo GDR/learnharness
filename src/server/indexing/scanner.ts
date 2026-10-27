@@ -123,26 +123,13 @@ export async function scanSourceDocuments(
 	}
 
 	// 3. Disconnected Vault Safety: check bindings
-	if (typeof vRegistry.checkVaultAvailability === "function") {
-		await vRegistry.checkVaultAvailability(vault.id).catch(() => {});
-	}
-	const refreshedVault = (await vRegistry.getVault(vault.id)) ?? vault;
-
-	const binding =
-		refreshedVault.bindings.find((b) => {
-			try {
-				return b.status === "available" && fs.existsSync(b.rootPath) && fs.statSync(b.rootPath).isDirectory();
-			} catch {
-				return false;
-			}
-		}) ??
-		refreshedVault.bindings.find((b) => {
-			try {
-				return fs.existsSync(b.rootPath) && fs.statSync(b.rootPath).isDirectory();
-			} catch {
-				return false;
-			}
-		});
+	const binding = vault.bindings.find((b) => {
+		try {
+			return b.status === "available" && fs.existsSync(b.rootPath) && fs.statSync(b.rootPath).isDirectory();
+		} catch {
+			return false;
+		}
+	});
 
 	if (!binding) {
 		throw new VaultUnavailableError(
@@ -169,6 +156,7 @@ export async function scanSourceDocuments(
 
 	// 5. Enumerate files on disk matching source include/exclude globs
 	const recursive = source.recursive !== false;
+	const excludeRegexes = source.exclude.map(globToRegex);
 
 	async function collectCandidateFiles(dir: string): Promise<string[]> {
 		const entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -181,9 +169,8 @@ export async function scanSourceDocuments(
 			if (entry.isDirectory()) {
 				// Early directory exclusion check
 				let skip = false;
-				for (const pattern of source.exclude) {
-					const rx = globToRegex(pattern);
-					if (rx.test(relPath) || rx.test(relPath + "/") || rx.test(relPath + "/dummy.md")) {
+				for (const rx of excludeRegexes) {
+					if (rx.test(relPath) || rx.test(relPath + "/")) {
 						skip = true;
 						break;
 					}
@@ -220,7 +207,7 @@ export async function scanSourceDocuments(
 
 		const contentBuffer = await fs.promises.readFile(fullPath);
 		const contentHash = crypto.createHash("sha256").update(contentBuffer).digest("hex");
-		const stat = await fs.promises.stat(fullPath);
+		const sizeBytes = contentBuffer.byteLength;
 
 		const docId = `doc_${crypto
 			.createHash("sha256")
@@ -248,7 +235,7 @@ export async function scanSourceDocuments(
 				contentHash,
 				revisionId,
 				status: "active",
-				sizeBytes: stat.size,
+				sizeBytes,
 				updatedAt: nowIso,
 			};
 			updatedInventory[docId] = newDoc;
@@ -274,7 +261,7 @@ export async function scanSourceDocuments(
 				contentHash,
 				revisionId,
 				status: "active",
-				sizeBytes: stat.size,
+				sizeBytes,
 				updatedAt: nowIso,
 			};
 			updatedInventory[docId] = restoredDoc;
@@ -289,7 +276,7 @@ export async function scanSourceDocuments(
 				vaultId: vault.id,
 				currentPath: relPath,
 				status: "active",
-				sizeBytes: stat.size,
+				sizeBytes,
 				updatedAt: existing.updatedAt ?? nowIso,
 			};
 			updatedInventory[docId] = unchangedDoc;
@@ -320,7 +307,7 @@ export async function scanSourceDocuments(
 				contentHash,
 				revisionId,
 				status: "active",
-				sizeBytes: stat.size,
+				sizeBytes,
 				updatedAt: nowIso,
 			};
 			updatedInventory[docId] = modDoc;
@@ -343,8 +330,12 @@ export async function scanSourceDocuments(
 	await saveSourceInventory(validProjectId, validSourceId, updatedInventory, effectiveDataDir);
 
 	// Also sync to project context sources store
-	for (const doc of Object.values(updatedInventory)) {
-		await context.sources.upsertDocument(doc).catch(() => {});
+	if (typeof context.sources.upsertDocuments === "function") {
+		await context.sources.upsertDocuments(Object.values(updatedInventory)).catch(() => {});
+	} else {
+		for (const doc of Object.values(updatedInventory)) {
+			await context.sources.upsertDocument(doc).catch(() => {});
+		}
 	}
 
 	return {

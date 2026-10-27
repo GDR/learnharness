@@ -311,6 +311,7 @@ export interface SourceStore {
 	removeSource(id: SourceId): Promise<void>;
 	listDocuments(sourceId: SourceId): Promise<SourceDocument[]>;
 	upsertDocument(doc: SourceDocument): Promise<void>;
+	upsertDocuments?(docs: SourceDocument[]): Promise<void>;
 }
 
 // ─── PracticeStore & ProblemSet — problem sets and problem snapshots ─────────
