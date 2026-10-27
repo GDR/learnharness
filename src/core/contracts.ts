@@ -18,3 +18,5 @@ export * from "./contracts/probe.ts";
 export * from "./contracts/models.ts";
 export * from "./contracts/project.ts";
 export * from "./contracts/obsidian.ts";
+export * from "./contracts/chunker.ts";
+export * from "./contracts/indexing.ts";

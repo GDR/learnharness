@@ -16,3 +16,5 @@ export * from "./local-agents.ts";
 export * from "./subscriptions.ts";
 export * from "./chatgpt.ts";
 export * from "./obsidian.ts";
+export * from "./chunker.ts";
+export * from "./indexing.ts";
