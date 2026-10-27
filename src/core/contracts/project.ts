@@ -264,27 +264,17 @@ export const attachedSourceScopeSchema = z.object({
 	projectId: projectIdSchema.optional(),
 });
 
-export interface SourceDocument {
-	id: DocumentId;
-	sourceId: SourceId;
-	vaultId: VaultId;
-	currentPath: string;
-	contentHash: string;
-	revisionId: string;
-	status: "active" | "missing" | "excluded" | "error";
-	indexedAt?: string;
-}
-
-export const sourceDocumentSchema = z.object({
-	id: documentIdSchema,
-	sourceId: sourceIdSchema,
-	vaultId: vaultIdSchema,
-	currentPath: z.string().min(1, "currentPath cannot be empty"),
-	contentHash: z.string().min(1, "contentHash cannot be empty"),
-	revisionId: z.string().min(1, "revisionId cannot be empty"),
-	status: z.enum(["active", "missing", "excluded", "error"]),
-	indexedAt: z.string().optional(),
-});
+export type { SourceDocument, SourceDocumentStatus } from "./indexing.ts";
+export {
+	sourceDocumentSchema,
+	sourceDocumentStatusSchema,
+	validateSourceDocument,
+	type ScanResult,
+	scanResultSchema,
+	validateScanResult,
+	matchesGlob,
+	globToRegex,
+} from "./indexing.ts";
 
 // ─── Source Evidence ─────────────────────────────────────────────────────────
 

@@ -296,7 +296,17 @@ export interface VaultRegistry {
 export interface SourceStore {
 	listSources(projectId: ProjectId): Promise<ProjectSource[]>;
 	getSource(id: SourceId): Promise<ProjectSource | null>;
-	addSource(source: Omit<ProjectSource, "id" | "createdAt">): Promise<ProjectSource>;
+	addSource(source: {
+		projectId: ProjectId;
+		vaultId: VaultId;
+		include?: string[];
+		exclude?: string[];
+		recursive?: boolean;
+		enabled?: boolean;
+		syncMode?: "manual" | "automatic";
+		deletionPolicy?: "deactivate" | "retain";
+		id?: SourceId;
+	}): Promise<ProjectSource>;
 	updateSource(id: SourceId, patch: Partial<Omit<ProjectSource, "id" | "projectId" | "createdAt">>): Promise<ProjectSource>;
 	removeSource(id: SourceId): Promise<void>;
 	listDocuments(sourceId: SourceId): Promise<SourceDocument[]>;
