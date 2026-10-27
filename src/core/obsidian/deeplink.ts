@@ -99,9 +99,15 @@ export function parseObsidianDeepLink(uri: string): ObsidianDeepLinkOptions | nu
 		const host = url.hostname || url.host;
 
 		if (host === "open") {
+			if (url.search) {
+				decodeURIComponent(url.search);
+			}
 			vaultName = url.searchParams.get("vault") ?? "";
 			filePath = url.searchParams.get("file") ?? "";
 		} else if (host === "vault") {
+			if (url.search) {
+				decodeURIComponent(url.search);
+			}
 			const pathname = decodeURIComponent(url.pathname).replace(/^\/+/, "");
 			const slashIdx = pathname.indexOf("/");
 			if (slashIdx === -1) return null;
@@ -148,6 +154,47 @@ export function parseObsidianDeepLink(uri: string): ObsidianDeepLinkOptions | nu
 
 // ─── 3. Wiki-Link Resolution ────────────────────────────────────────────────
 
+export interface WikiLinkIndex {
+	exactPathMap: Map<string, string[]>;
+	ciPathMap: Map<string, string[]>;
+	baseMap: Map<string, string[]>;
+	ciBaseMap: Map<string, string[]>;
+}
+
+export function createWikiLinkIndex(availablePaths: string[]): WikiLinkIndex {
+	const exactPathMap = new Map<string, string[]>();
+	const ciPathMap = new Map<string, string[]>();
+	const baseMap = new Map<string, string[]>();
+	const ciBaseMap = new Map<string, string[]>();
+
+	const uniquePaths = Array.from(new Set(availablePaths.filter(Boolean)));
+
+	for (const p of uniquePaths) {
+		const norm = normalizeNotePath(p);
+		const base = getNoteBasename(p);
+		const normLower = norm.toLowerCase();
+		const baseLower = base.toLowerCase();
+
+		const exact = exactPathMap.get(norm);
+		if (exact) exact.push(p);
+		else exactPathMap.set(norm, [p]);
+
+		const ciPath = ciPathMap.get(normLower);
+		if (ciPath) ciPath.push(p);
+		else ciPathMap.set(normLower, [p]);
+
+		const baseList = baseMap.get(base);
+		if (baseList) baseList.push(p);
+		else baseMap.set(base, [p]);
+
+		const ciBase = ciBaseMap.get(baseLower);
+		if (ciBase) ciBase.push(p);
+		else ciBaseMap.set(baseLower, [p]);
+	}
+
+	return { exactPathMap, ciPathMap, baseMap, ciBaseMap };
+}
+
 function matchResult(
 	target: string,
 	matches: string[],
@@ -164,7 +211,7 @@ function matchResult(
 
 export function resolveWikiLink(
 	target: string,
-	availablePaths: string[],
+	availablePaths: string[] | WikiLinkIndex,
 	currentFilePath?: string,
 ): WikiLinkResolution {
 	if (typeof target !== "string") return { target: "", status: "unresolved" };
@@ -197,9 +244,16 @@ export function resolveWikiLink(
 		return { target, subpath, status: "unresolved" };
 	}
 
-	if (!Array.isArray(availablePaths) || availablePaths.length === 0) {
+	if (!availablePaths) {
 		return { target, subpath, status: "unresolved" };
 	}
+	if (Array.isArray(availablePaths) && availablePaths.length === 0) {
+		return { target, subpath, status: "unresolved" };
+	}
+
+	const index: WikiLinkIndex = Array.isArray(availablePaths)
+		? createWikiLinkIndex(availablePaths)
+		: availablePaths;
 
 	const targetNorm = normalizeNotePath(noteIdentifier);
 	const targetBase = getNoteBasename(noteIdentifier);
@@ -210,41 +264,39 @@ export function resolveWikiLink(
 		const currentDir = getNoteDir(currentFilePath);
 		if (noteIdentifier.startsWith("./") || noteIdentifier.startsWith("../")) {
 			const resolvedRel = resolveRelativeNotePath(currentDir, noteIdentifier);
-			const relMatches = availablePaths.filter((p) => normalizeNotePath(p) === resolvedRel);
+			const relMatches = index.exactPathMap.get(resolvedRel) ?? [];
 			const r = matchResult(target, relMatches, subpath);
 			if (r) return r;
 		} else if (!isPath) {
 			const sameFolderNorm = currentDir ? `${currentDir}/${targetBase}` : targetBase;
-			const sameFolderMatches = availablePaths.filter((p) => normalizeNotePath(p) === sameFolderNorm);
+			const sameFolderMatches = index.exactPathMap.get(sameFolderNorm) ?? [];
 			const r = matchResult(target, sameFolderMatches, subpath);
 			if (r) return r;
 		}
 	}
 
 	// Tier B: Root-relative exact path
-	const exactMatches = availablePaths.filter((p) => normalizeNotePath(p) === targetNorm);
+	const exactMatches = index.exactPathMap.get(targetNorm) ?? [];
 	const rExact = matchResult(target, exactMatches, subpath);
 	if (rExact) return rExact;
 
 	// Tier C: Bare basename match (case-sensitive)
 	if (!isPath) {
-		const basenameMatches = availablePaths.filter((p) => getNoteBasename(p) === targetBase);
+		const basenameMatches = index.baseMap.get(targetBase) ?? [];
 		const rBase = matchResult(target, basenameMatches, subpath);
 		if (rBase) return rBase;
 	}
 
 	// Tier D: Case-insensitive match (path then basename)
-	const ciPathMatches = availablePaths.filter(
-		(p) => normalizeNotePath(p).toLowerCase() === targetNorm.toLowerCase(),
-	);
+	const ciPathMatches = index.ciPathMap.get(targetNorm.toLowerCase()) ?? [];
 	const rCiPath = matchResult(target, ciPathMatches, subpath);
 	if (rCiPath) return rCiPath;
 
-	const ciBaseMatches = availablePaths.filter(
-		(p) => getNoteBasename(p).toLowerCase() === targetBase.toLowerCase(),
-	);
-	const rCiBase = matchResult(target, ciBaseMatches, subpath);
-	if (rCiBase) return rCiBase;
+	if (!isPath) {
+		const ciBaseMatches = index.ciBaseMap.get(targetBase.toLowerCase()) ?? [];
+		const rCiBase = matchResult(target, ciBaseMatches, subpath);
+		if (rCiBase) return rCiBase;
+	}
 
 	return { target, subpath, status: "unresolved" };
 }
@@ -262,6 +314,7 @@ export function buildBacklinkIndex(
 	if (!Array.isArray(documents) || documents.length === 0) return index;
 
 	const allPaths = documents.map((doc) => doc.filePath).filter(Boolean);
+	const linkIndex = createWikiLinkIndex(allPaths);
 
 	for (const doc of documents) {
 		const sourceFilePath = doc.filePath || doc.parsed?.filePath || "";
@@ -282,7 +335,7 @@ export function buildBacklinkIndex(
 						: `#${link.subpath.value}`
 					: "");
 
-			const resolution = resolveWikiLink(linkTarget, allPaths, sourceFilePath);
+			const resolution = resolveWikiLink(linkTarget, linkIndex, sourceFilePath);
 			if (resolution.status === "resolved" && resolution.resolvedPath) {
 				const targetPath = resolution.resolvedPath;
 
@@ -384,6 +437,9 @@ export function computeRenameRefactor(options: {
 	const newBase = getNoteBasename(newPath);
 	const pathsAfterRename = allPaths.map((p) => (normalizeNotePath(p) === oldNorm ? newPath : p));
 
+	const allPathsIndex = createWikiLinkIndex(allPaths);
+	const pathsAfterRenameIndex = createWikiLinkIndex(pathsAfterRename);
+
 	for (const doc of documents) {
 		let wikiLinks = doc.parsed?.wikiLinks ?? [];
 		if (wikiLinks.length === 0 && doc.content.includes("[[")) {
@@ -399,7 +455,7 @@ export function computeRenameRefactor(options: {
 		for (const link of sortedLinks) {
 			if (!link.target) continue;
 
-			const resolution = resolveWikiLink(link.target, allPaths, doc.filePath);
+			const resolution = resolveWikiLink(link.target, allPathsIndex, doc.filePath);
 			if (resolution.status === "resolved" && resolution.resolvedPath && isSamePath(resolution.resolvedPath, oldPath)) {
 				const hadExtension = /\.mdx?$/i.test(link.target);
 				const hadSlash = link.target.includes("/") || link.target.includes("\\");
@@ -408,7 +464,7 @@ export function computeRenameRefactor(options: {
 				if (hadSlash) {
 					newTarget = hadExtension ? `${newNorm}.md` : newNorm;
 				} else {
-					const checkRes = resolveWikiLink(newBase, pathsAfterRename, doc.filePath);
+					const checkRes = resolveWikiLink(newBase, pathsAfterRenameIndex, doc.filePath);
 					if (checkRes.status === "resolved" && checkRes.resolvedPath && isSamePath(checkRes.resolvedPath, newPath)) {
 						newTarget = hadExtension ? `${newBase}.md` : newBase;
 					} else {

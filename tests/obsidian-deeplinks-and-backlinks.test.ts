@@ -17,6 +17,7 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { performance } from "node:perf_hooks";
 
 import {
 	createObsidianDeepLink,
@@ -738,6 +739,152 @@ describe("Milestone B Slice 4: Deep-Links, Wiki-Links & Backlink Resolution", ()
 				documents,
 			});
 			assert.equal(results.length, 0);
+		});
+	});
+
+	// ─── 8. Remediation Regression Tests (PR #17 Fixes) ─────────────────────
+
+	describe("Remediation Regression Tests (PR #17 Fixes)", () => {
+		describe("Tier D Path Resolution Guard & Refactoring Invariants", () => {
+			it("strictly does not fall back to basename across folders when explicit path does not exist", () => {
+				const availablePaths = ["Cooking/Quantum.md"];
+				const res = resolveWikiLink("Physics/Quantum", availablePaths);
+				assert.equal(res.status, "unresolved");
+				assert.equal(res.target, "Physics/Quantum");
+				assert.equal(res.resolvedPath, undefined);
+			});
+
+			it("resolves explicit path when exact or case-insensitive path match exists", () => {
+				const availablePaths = ["Physics/Quantum.md"];
+				const resExact = resolveWikiLink("Physics/Quantum", availablePaths);
+				assert.equal(resExact.status, "resolved");
+				assert.equal(resExact.resolvedPath, "Physics/Quantum.md");
+
+				const resCi = resolveWikiLink("physics/quantum", availablePaths);
+				assert.equal(resCi.status, "resolved");
+				assert.equal(resCi.resolvedPath, "Physics/Quantum.md");
+			});
+
+			it("permits basename fallback in Tier D only for bare targets without directory slashes", () => {
+				const availablePaths = ["Cooking/Quantum.md"];
+				const resBare = resolveWikiLink("quantum", availablePaths);
+				assert.equal(resBare.status, "resolved");
+				assert.equal(resBare.resolvedPath, "Cooking/Quantum.md");
+			});
+
+			it("does NOT mutate notes with explicit path links when unrelated same-basename note is renamed", () => {
+				const docContent = "Important reading: [[Physics/Quantum]]. Do not edit.";
+				const parsed = parseObsidianMarkdown(docContent, "research/physics.md");
+
+				const documents = [
+					{
+						filePath: "research/physics.md",
+						content: docContent,
+						parsed,
+					},
+					{
+						filePath: "Cooking/Quantum.md",
+						content: "# Cooking Quantum",
+						parsed: parseObsidianMarkdown("# Cooking Quantum", "Cooking/Quantum.md"),
+					},
+				];
+
+				const results = computeRenameRefactor({
+					oldPath: "Cooking/Quantum.md",
+					newPath: "Cooking/MolecularGastronomy.md",
+					documents,
+				});
+
+				// research/physics.md must NOT be refactored because [[Physics/Quantum]] does not resolve to Cooking/Quantum.md
+				assert.equal(results.length, 0);
+			});
+		});
+
+		describe("Malformed URI Percent-Encoding Validation", () => {
+			it("returns null on corrupted percent sequences (%ZZ) in query parameters", () => {
+				assert.equal(parseObsidianDeepLink("obsidian://open?vault=%ZZ&file=valid"), null);
+				assert.equal(parseObsidianDeepLink("obsidian://open?vault=valid&file=%ZZ"), null);
+				assert.equal(parseObsidianDeepLink("obsidian://open?vault=V%A&file=valid"), null);
+			});
+
+			it("returns null on corrupted percent sequences in shorthand path and hash", () => {
+				assert.equal(parseObsidianDeepLink("obsidian://vault/%ZZ/file"), null);
+				assert.equal(parseObsidianDeepLink("obsidian://open?vault=valid&file=note#%ZZ"), null);
+				assert.equal(parseObsidianDeepLink("obsidian://open?vault=valid&file=note#^%ZZ"), null);
+			});
+
+			it("correctly decodes valid percent sequences in query parameters", () => {
+				const res = parseObsidianDeepLink("obsidian://open?vault=My%20Vault&file=Notes%2FDeep%20Dive.md");
+				assert.ok(res !== null);
+				assert.equal(res.vaultName, "My Vault");
+				assert.equal(res.filePath, "Notes/Deep Dive");
+			});
+		});
+
+		describe("Backlink Indexer Pre-Indexed Performance", () => {
+			it("indexes 500 documents with 5,200 links in under 200ms", () => {
+				const NUM_DOCS = 500;
+				const folders = ["physics", "math", "biology", "history", "notes"];
+				const allPaths = ["hub/CentralHub.md"];
+				for (let i = 1; i < NUM_DOCS; i++) {
+					allPaths.push(`${folders[i % folders.length]}/note_${i}.md`);
+				}
+
+				const docs = [];
+				for (let i = 0; i < NUM_DOCS; i++) {
+					const filePath = allPaths[i]!;
+					const links = [];
+					let content = `# Document ${i}\n\n`;
+
+					if (i > 0 && i <= 200) {
+						const linkText = "[[CentralHub]]";
+						const start = content.length;
+						content += `Hub reference: ${linkText}.\n`;
+						links.push({
+							target: "CentralHub",
+							range: { startOffset: start + 15, endOffset: start + 15 + linkText.length },
+						});
+					}
+
+					for (let j = 0; j < 10; j++) {
+						const targetIdx = (i + j + 1) % NUM_DOCS;
+						const targetBase = `note_${targetIdx}`;
+						const linkText = `[[${targetBase}]]`;
+						const start = content.length;
+						content += `Cross-ref: ${linkText}.\n`;
+						links.push({
+							target: targetBase,
+							range: { startOffset: start + 11, endOffset: start + 11 + linkText.length },
+						});
+					}
+
+					docs.push({
+						filePath,
+						rawContent: content,
+						parsed: {
+							filePath,
+							frontmatter: {},
+							headings: [{ level: 1, text: `Document ${i}`, slug: `document-${i}`, range: { startOffset: 0, endOffset: 12 } }],
+							sections: [],
+							blocks: [],
+							wikiLinks: links,
+							tags: [],
+							callouts: [],
+							equations: [],
+							tables: [],
+						},
+					});
+				}
+
+				const t0 = performance.now();
+				const index = buildBacklinkIndex(docs);
+				const elapsed = performance.now() - t0;
+
+				assert.ok(elapsed < 200, `buildBacklinkIndex took ${elapsed.toFixed(2)}ms, expected <200ms`);
+				const hubBacklinks = index.get("hub/CentralHub.md");
+				assert.ok(hubBacklinks);
+				assert.equal(hubBacklinks.length, 200);
+			});
 		});
 	});
 });
