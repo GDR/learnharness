@@ -100,6 +100,8 @@ export * from "./contracts/reconciler.ts";
 // StudyScope & Session Contracts (Milestone D Slice 1). Pure, browser-safe.
 export * from "./contracts/scope.ts";
 export * from "./contracts/session.ts";
+// Generation Counter & Atomic Commit Contracts (Milestone C Slice 6). Pure, browser-safe.
+export * from "./contracts/generation.ts";
 
 
 

@@ -36,19 +36,47 @@ export function validateProjectId(raw: unknown): ProjectId {
 	return result.data;
 }
 
+interface AsyncLocalStorageLike<T> {
+	getStore(): T | undefined;
+	run<R>(store: T, callback: () => R): R;
+}
+
+type AsyncLocalStorageConstructor = new <T>() => AsyncLocalStorageLike<T>;
+
+function resolveAsyncLocalStorage(): AsyncLocalStorageConstructor | undefined {
+	try {
+		const proc = (globalThis as unknown as {
+			process?: {
+				getBuiltinModule?: (id: string) => { AsyncLocalStorage?: AsyncLocalStorageConstructor };
+			};
+		}).process;
+		if (typeof proc?.getBuiltinModule === "function") {
+			return proc.getBuiltinModule("node:async_hooks")?.AsyncLocalStorage;
+		}
+	} catch {
+		// Browser or non-node runtime
+	}
+	return undefined;
+}
+
+const NodeAsyncLocalStorage = resolveAsyncLocalStorage();
+
 interface GlobalProjectAuditLocks {
 	__lhProjectAuditLocks?: Map<ProjectId, { tail: Promise<void> }>;
+	__lhProjectHeldLocks?: AsyncLocalStorageLike<Set<ProjectId>>;
 }
 
 /**
  * Project-keyed writer locks replacing globalThis.__lhAuditLock.
  * Serializes audit and ledger commits per-project while allowing
  * concurrent operations across distinct projects to run in parallel.
+ * Supports re-entrant acquisition within the same async context when run under Node.js.
  */
 export function getProjectAuditLock(projectId: unknown): <T>(fn: () => Promise<T>) => Promise<T> {
 	const validId = validateProjectId(projectId);
 	const g = globalThis as typeof globalThis & GlobalProjectAuditLocks;
 	const locks = (g.__lhProjectAuditLocks ??= new Map());
+	const heldStorage = (g.__lhProjectHeldLocks ??= NodeAsyncLocalStorage ? new NodeAsyncLocalStorage<Set<ProjectId>>() : undefined);
 
 	let lock = locks.get(validId);
 	if (!lock) {
@@ -57,11 +85,22 @@ export function getProjectAuditLock(projectId: unknown): <T>(fn: () => Promise<T
 	}
 
 	return async function withLock<T>(fn: () => Promise<T>): Promise<T> {
+		const currentHeld = heldStorage?.getStore();
+		if (currentHeld?.has(validId)) {
+			// Re-entrant lock for this project within the same async execution context
+			return fn();
+		}
+
 		const prev = lock.tail;
 		let release!: () => void;
 		lock.tail = new Promise<void>((resolve) => (release = resolve));
 		try {
 			await prev;
+			if (heldStorage) {
+				const nextHeld = new Set(currentHeld);
+				nextHeld.add(validId);
+				return await heldStorage.run(nextHeld, fn);
+			}
 			return await fn();
 		} finally {
 			release();

@@ -28,6 +28,7 @@ import {
 import { resolveProjectSource } from "../sources.ts";
 import { getProjectStore } from "../projects.ts";
 import { getVaultRegistry } from "../../store/vaults.ts";
+import { recoverGraphStore } from "../../store/graph-generation.ts";
 import type { ProjectStore, VaultRegistry } from "../../core/ports.ts";
 
 export const DEFAULT_MAX_CONCURRENT_JOBS = 3;
@@ -123,6 +124,17 @@ export class IndexingQueue {
 
 			for (const pEntry of projectEntries) {
 				if (!pEntry.isDirectory()) continue;
+
+				// Milestone C Slice 6: Recover uncommitted graph transactions on boot
+				const graphDir = path.join(projectsDir, pEntry.name, "graph");
+				if (fs.existsSync(graphDir)) {
+					try {
+						await recoverGraphStore(graphDir);
+					} catch {
+						// Non-fatal
+					}
+				}
+
 				const idxDir = path.join(projectsDir, pEntry.name, "indexing");
 				if (!fs.existsSync(idxDir)) continue;
 

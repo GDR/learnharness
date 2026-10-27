@@ -301,6 +301,7 @@ export function computeReconciliationPlan(input: ComputePlanInput): Reconciliati
 export interface ApplyPlanDeps {
 	graphStore: GraphStore;
 	projectId?: string;
+	baseGeneration?: number;
 }
 
 /**
@@ -342,13 +343,85 @@ export async function applyReconciliationPlan(
 			};
 		}
 
-		// 2. Append new GraphNode definitions
+		// 2. Scenario D with empty evidence -> skip commit
+		if (plan.scenario === "D_DELETED" && plan.evidenceToSupersede.length === 0) {
+			return {
+				projectId: plan.projectId,
+				sourceId: plan.sourceId,
+				documentId: plan.documentId,
+				revisionId: plan.revisionId,
+				status: "skipped",
+				scenario: plan.scenario,
+				stats: {
+					evidenceAppended: 0,
+					evidenceSuperseded: 0,
+					propositionsCreated: 0,
+					propositionsReused: 0,
+					propositionsOrphaned: 0,
+					durationMs: Date.now() - startTime,
+				},
+				diagnostics: {
+					reusedPropositionIds: [],
+					createdPropositionIds: [],
+					orphanedPropositionIds: [],
+					stillSupportedPropositionIds: [],
+					dedupSkippedCount: plan.unchangedEvidenceCount,
+				},
+			};
+		}
+
+		const batch = [...plan.evidenceToSupersede, ...plan.evidenceToAppend];
+
+		// Milestone C Slice 6: Atomic generation commit
+		if (typeof deps.graphStore.commitGeneration === "function") {
+			const commitRes = await deps.graphStore.commitGeneration({
+				projectId: targetProjectId,
+				nodesToAppend: plan.nodesToAppend,
+				evidenceBatch: batch,
+				sourceId: plan.sourceId,
+				documentId: plan.documentId,
+				baseGeneration: deps.baseGeneration ?? plan.baseGeneration,
+				description: `Reconcile document ${plan.documentId} (${plan.scenario})`,
+			});
+
+			const status: ReconciliationResult["status"] =
+				plan.scenario === "D_DELETED"
+					? plan.orphanedPropositionIds.length > 0
+						? "orphaned"
+						: "superseded"
+					: "applied";
+
+			return {
+				projectId: plan.projectId,
+				sourceId: plan.sourceId,
+				documentId: plan.documentId,
+				revisionId: plan.revisionId,
+				status,
+				scenario: plan.scenario,
+				generation: commitRes.generation,
+				commitId: commitRes.commitId,
+				stats: {
+					evidenceAppended: plan.evidenceToAppend.length,
+					evidenceSuperseded: plan.evidenceToSupersede.length,
+					propositionsCreated: plan.nodesToAppend.length,
+					propositionsReused: plan.reusedPropositionIds.length,
+					propositionsOrphaned: plan.orphanedPropositionIds.length,
+					durationMs: Date.now() - startTime,
+				},
+				diagnostics: {
+					reusedPropositionIds: plan.reusedPropositionIds,
+					createdPropositionIds: plan.createdPropositionIds,
+					orphanedPropositionIds: plan.orphanedPropositionIds,
+					stillSupportedPropositionIds: plan.stillSupportedPropositionIds,
+					dedupSkippedCount: plan.dedupSkippedCount ?? 0,
+				},
+			};
+		}
+
+		// Fallback for GraphStore without commitGeneration
 		for (const node of plan.nodesToAppend) {
 			deps.graphStore.appendNode(node);
 		}
-
-		// 3. Batch write evidence mutations (superseded transitions + new active records)
-		const batch = [...plan.evidenceToSupersede, ...plan.evidenceToAppend];
 		if (batch.length > 0) {
 			if (typeof deps.graphStore.appendEvidenceBatch === "function") {
 				await deps.graphStore.appendEvidenceBatch(batch);
@@ -403,34 +476,49 @@ export interface ReconcileDocumentOptions {
 
 /**
  * Reconciles a single document against GraphStore.
+ * Wrapped entirely in getProjectAuditLock to ensure atomic read-plan-commit (Scenario E).
  */
 export async function reconcileDocument(
 	input: ReconcileDocumentOptions,
 ): Promise<ReconciliationResult> {
 	const { projectId, sourceId, document, extractedPropositions, graphStore, options } = input;
+	const withLock = getProjectAuditLock(projectId);
 
-	const [existingEvidence, allActiveEvidence] = await Promise.all([
-		typeof graphStore.getEvidenceForDocument === "function"
-			? graphStore.getEvidenceForDocument(document.id)
-			: Promise.resolve([]),
-		typeof graphStore.readEvidence === "function"
-			? graphStore.readEvidence({ status: "active" })
-			: Promise.resolve([]),
-	]);
-	const existingNodes = graphStore.readNodes();
+	return withLock(async () => {
+		const [existingEvidence, allActiveEvidence, currentGen] = await Promise.all([
+			typeof graphStore.getEvidenceForDocument === "function"
+				? graphStore.getEvidenceForDocument(document.id)
+				: Promise.resolve([]),
+			typeof graphStore.readEvidence === "function"
+				? graphStore.readEvidence({ status: "active" })
+				: Promise.resolve([]),
+			typeof graphStore.getGeneration === "function"
+				? graphStore.getGeneration()
+				: Promise.resolve(undefined),
+		]);
+		const existingNodes = graphStore.readNodes();
 
-	const plan = computeReconciliationPlan({
-		projectId,
-		sourceId,
-		document,
-		extractedPropositions,
-		existingEvidence,
-		existingNodes,
-		allActiveEvidence,
-		options,
+		const plan = computeReconciliationPlan({
+			projectId,
+			sourceId,
+			document,
+			extractedPropositions,
+			existingEvidence,
+			existingNodes,
+			allActiveEvidence,
+			options,
+		});
+
+		if (currentGen) {
+			plan.baseGeneration = currentGen.generation;
+		}
+
+		return applyReconciliationPlan(plan, {
+			graphStore,
+			projectId,
+			baseGeneration: plan.baseGeneration,
+		});
 	});
-
-	return applyReconciliationPlan(plan, { graphStore, projectId });
 }
 
 export interface ReconcileScanResultOptions {
