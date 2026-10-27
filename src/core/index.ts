@@ -88,4 +88,9 @@ export * from "./audit-lock.ts";
 export * from "./obsidian/parser.ts";
 // Obsidian Deep-Links, Wiki-Link Resolution, Backlinks & Rename Refactoring (Milestone B). Pure, browser-safe.
 export * from "./obsidian/deeplink.ts";
+// Section-Aware Markdown Chunker (Milestone C). Pure, browser-safe.
+export {
+	chunkObsidianDocument,
+	estimateMarkdownTokens,
+} from "./obsidian/chunker.ts";
 
