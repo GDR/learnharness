@@ -20,7 +20,6 @@ export type ProjectId = string;
 export type VaultId = string;
 export type SourceId = string;
 export type DocumentId = string;
-export type EvidenceId = string;
 
 export const projectIdRegex = /^[A-Za-z0-9_-]+$/;
 
@@ -115,7 +114,6 @@ export const DEFAULT_SOURCE_EXCLUDE: readonly string[] = [
 export const DEFAULT_SOURCE_INCLUDE: readonly string[] = ["**/*.md"];
 
 export const documentIdSchema = z.string().min(1, "documentId cannot be empty");
-export const evidenceIdSchema = z.string().min(1, "evidenceId cannot be empty");
 
 export const DEFAULT_PROJECT_ID: ProjectId = "proj_default";
 
@@ -278,45 +276,19 @@ export {
 
 // ─── Source Evidence ─────────────────────────────────────────────────────────
 
-export interface SourceEvidenceLocation {
-	heading?: string;
-	blockId?: string;
-	startOffset?: number;
-	endOffset?: number;
-}
+export {
+	type EvidenceId,
+	evidenceIdSchema,
+	type SourceEvidenceLocation,
+	sourceEvidenceLocationSchema,
+	type EvidenceProvenance,
+	type EvidenceStatus,
+	type SourceEvidence,
+	sourceEvidenceSchema,
+	validateSourceEvidence,
+	computeEvidenceDedupKey,
+} from "./evidence.ts";
 
-export const sourceEvidenceLocationSchema = z.object({
-	heading: z.string().optional(),
-	blockId: z.string().optional(),
-	startOffset: z.number().int().nonnegative().optional(),
-	endOffset: z.number().int().nonnegative().optional(),
-});
-
-export interface SourceEvidence {
-	id: EvidenceId;
-	projectId: ProjectId;
-	sourceId: SourceId;
-	documentId: DocumentId;
-	revisionId: string;
-	propositionId: string;
-	location: SourceEvidenceLocation;
-	provenance: "explicit-source" | "model-inferred";
-	status: "active" | "superseded";
-	extractorVersion: string;
-}
-
-export const sourceEvidenceSchema = z.object({
-	id: evidenceIdSchema,
-	projectId: projectIdSchema,
-	sourceId: sourceIdSchema,
-	documentId: documentIdSchema,
-	revisionId: z.string().min(1, "revisionId cannot be empty"),
-	propositionId: z.string().min(1, "propositionId cannot be empty"),
-	location: sourceEvidenceLocationSchema,
-	provenance: z.enum(["explicit-source", "model-inferred"]),
-	status: z.enum(["active", "superseded"]),
-	extractorVersion: z.string().min(1, "extractorVersion cannot be empty"),
-});
 
 // ─── Study Scope ─────────────────────────────────────────────────────────────
 
