@@ -95,5 +95,9 @@ export {
 	chunkObsidianDocument,
 	estimateMarkdownTokens,
 } from "./obsidian/chunker.ts";
+// StudyScope & Session Contracts (Milestone D Slice 1). Pure, browser-safe.
+export * from "./contracts/scope.ts";
+export * from "./contracts/session.ts";
+
 
 
