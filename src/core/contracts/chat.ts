@@ -10,6 +10,8 @@ import type { LhMessage } from "../native-messages.ts";
 import type { Phase3 } from "../phases.ts";
 import type { PlanNodeStatus, PlanTree } from "./plan.ts";
 import type { EmissionStats } from "./graph.ts";
+import type { StudyScope } from "./scope.ts";
+
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
@@ -58,7 +60,10 @@ export interface ChatRecord {
 	 *  (the downgrade scenario) is REFUSED on read: a read-modify-write
 	 *  store must never rewrite what it doesn't understand. */
 	version?: number;
+	/** Persisted study scope defining target learning boundary (Milestone D). */
+	scope?: StudyScope;
 }
+
 
 /** The chat record format this build writes and understands. */
 export const CURRENT_CHAT_VERSION = 1;
@@ -275,7 +280,10 @@ export interface ChatSummary {
 	 *  summary spread (the picker never needs it from here; the full record
 	 *  is its source). */
 	settings?: ChatSettings;
+	/** Persisted study scope exposed on summary listings (Milestone D). */
+	scope?: StudyScope;
 }
+
 
 /** The sidebar's session row: a summary + live liveness. The chats list
  *  route attaches `busy` from the turn-liveness registry ONLY — a running

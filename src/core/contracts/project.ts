@@ -292,23 +292,30 @@ export {
 
 // ─── Study Scope ─────────────────────────────────────────────────────────────
 
-export interface StudyScope {
-	projectId: ProjectId;
-	sourceIds?: SourceId[];
-	documentIds?: DocumentId[];
-	propositionIds?: string[];
-	includePrerequisites: boolean;
-	grounding: "sources-only" | "sources-plus-external";
-}
+export {
+	type StudyScopeType,
+	type SourceGroundingMode,
+	type StudyScope,
+	type BaseStudyScope,
+	type ProjectStudyScope,
+	type SourceStudyScope,
+	type DocumentStudyScope,
+	type TagStudyScope,
+	type PropositionStudyScope,
+	type DiscriminatedStudyScope,
+	studyScopeTypes,
+	sourceGroundingModes,
+	studyScopeTypeSchema,
+	sourceGroundingModeSchema,
+	studyScopeSchema,
+	validateStudyScope,
+	InvalidStudyScopeError,
+	DEFAULT_STUDY_SCOPE,
+	createDefaultStudyScope,
+	inferStudyScopeType,
+	resolveSessionScope,
+} from "./scope.ts";
 
-export const studyScopeSchema = z.object({
-	projectId: projectIdSchema,
-	sourceIds: z.array(sourceIdSchema).optional(),
-	documentIds: z.array(documentIdSchema).optional(),
-	propositionIds: z.array(z.string()).optional(),
-	includePrerequisites: z.boolean(),
-	grounding: z.enum(["sources-only", "sources-plus-external"]),
-});
 
 // ─── Project Context ─────────────────────────────────────────────────────────
 
