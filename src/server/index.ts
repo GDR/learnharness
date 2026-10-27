@@ -56,4 +56,6 @@ export { createSourceStore } from "../store/sources.ts";
 export { runLegacyMigration } from "./migration/legacy-migration.ts";
 // Document Inventory & Scanner (Milestone C Slice 1).
 export * from "./indexing/scanner.ts";
+// Graph Reconciliation Engine (Milestone C Slice 5).
+export * from "./indexing/reconciler.ts";
 

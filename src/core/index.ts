@@ -95,5 +95,7 @@ export {
 	chunkObsidianDocument,
 	estimateMarkdownTokens,
 } from "./obsidian/chunker.ts";
+// Graph Reconciliation Contracts (Milestone C Slice 5). Pure, browser-safe.
+export * from "./contracts/reconciler.ts";
 
 
