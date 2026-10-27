@@ -1,0 +1,17 @@
+{
+  "name": "learnharness-obsidian-bridge",
+  "version": "1.0.0",
+  "description": "Thin Obsidian Bridge Plugin connecting Obsidian notes to LearnHarness workspace learning sessions and graphs.",
+  "main": "main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "learnharness"
+  ],
+  "author": "LearnHarness",
+  "license": "AGPL-3.0-only",
+  "private": true
+}
