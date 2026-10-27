@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage, StudyScope } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -45,7 +45,7 @@ export function createChatStore(chatsDir: string = PATHS.chats): ChatStore {
 	 *  phase, busy, pendingQuestion) is already announced by turn-started /
 	 *  turn-settled, which the sidebar refetches on. Silence here is law,
 	 *  not oversight. */
-	function createChat(title: string, kind?: "practice"): ChatRecord {
+	function createChat(title: string, kind?: "practice", scope?: StudyScope): ChatRecord {
 		const now = new Date().toISOString();
 		const record: ChatRecord = {
 			id: `chat_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`,
@@ -56,12 +56,14 @@ export function createChatStore(chatsDir: string = PATHS.chats): ChatStore {
 			// Practice sessions carry the marker; teach stays ABSENT (absence
 			// reads as teach — pre-practice records never migrate).
 			...(kind === "practice" ? { kind: "practice" as const } : {}),
+			...(scope ? { scope } : {}),
 		};
 		fs.mkdirSync(resolvedChatsDir, { recursive: true });
 		writeChat(record);
 		emit("chats-changed", {});
 		return { ...record, version: CURRENT_CHAT_VERSION }; // the in-memory twin of what landed on disk
 	}
+
 
 	function getChat(id: string): ChatRecord | null {
 		let parsed: unknown;
@@ -210,6 +212,15 @@ export function createChatStore(chatsDir: string = PATHS.chats): ChatStore {
 		writeChat(record);
 	}
 
+	/** Persist the per-chat study scope (Milestone D). */
+	function saveScope(id: string, scope: StudyScope): void {
+		const record = getChat(id);
+		if (!record) throw new Error(`Chat not found: ${id}`);
+		record.scope = scope;
+		// Deliberately does NOT bump updatedAt: scope mutations maintain sidebar ordering
+		writeChat(record);
+	}
+
 	return {
 		createChat,
 		getChat,
@@ -217,6 +228,7 @@ export function createChatStore(chatsDir: string = PATHS.chats): ChatStore {
 		saveMessages,
 		saveTree,
 		saveSettings,
+		saveScope,
 		renameChat,
 		deleteChat,
 		appendTurnUsage,
@@ -225,3 +237,4 @@ export function createChatStore(chatsDir: string = PATHS.chats): ChatStore {
 }
 
 export const chatStore: ChatStore = createChatStore(PATHS.chats);
+
