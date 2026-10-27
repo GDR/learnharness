@@ -114,6 +114,9 @@ export {
 } from "./retrieval/scoring.ts";
 // Ask Sources Domain Contracts (Milestone D Slice 3). Pure, browser-safe.
 export * from "./contracts/ask.ts";
+// Scoped Study Sessions Domain Contracts (Milestone D Slice 4). Pure, browser-safe.
+export * from "./contracts/study.ts";
+
 
 
 

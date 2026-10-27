@@ -107,12 +107,18 @@ describe("Suite 2: StudyScopeIndicator Component", () => {
 });
 
 describe("Suite 3: ComposerModeToggle Component", () => {
-	it("renders Chat and Ask Sources buttons with active styling", () => {
+	it("renders Chat, Study, and Ask Sources buttons with active styling", () => {
 		const htmlChat = renderToStaticMarkup(<ComposerModeToggle mode="chat" />);
 		assert.ok(htmlChat.includes('data-testid="composer-mode-chat"'));
+		assert.ok(htmlChat.includes('data-testid="composer-mode-study"'));
 		assert.ok(htmlChat.includes('data-testid="composer-mode-ask"'));
 		assert.ok(htmlChat.includes("Chat"));
+		assert.ok(htmlChat.includes("Study"));
 		assert.ok(htmlChat.includes("Ask Sources"));
+
+		const htmlStudy = renderToStaticMarkup(<ComposerModeToggle mode="study" />);
+		assert.ok(htmlStudy.includes('data-testid="composer-mode-toggle"'));
+		assert.ok(htmlStudy.includes("bg-primary text-primary-foreground"));
 
 		const htmlAsk = renderToStaticMarkup(<ComposerModeToggle mode="ask" />);
 		assert.ok(htmlAsk.includes('data-testid="composer-mode-toggle"'));
@@ -138,6 +144,27 @@ describe("Suite 4: ChatComposer Integration", () => {
 		assert.ok(html.includes("Ask, answer, or steer the lesson"));
 		assert.ok(!html.includes('data-testid="study-scope-indicator"'));
 	});
+
+	it("renders Study mode with scope indicator and study placeholder", () => {
+		const html = renderToStaticMarkup(
+			<ChatComposer
+				busy={false}
+				value=""
+				onChange={() => {}}
+				onSend={() => {}}
+				onStop={() => {}}
+				canSend={false}
+				mode="study"
+				scope={{ type: "document", projectId: "p1", documentIds: ["d1"] }}
+			/>,
+		);
+
+		assert.ok(html.includes('data-testid="chat-composer"'));
+		assert.ok(html.includes('data-testid="study-scope-indicator"'));
+		assert.ok(html.includes("1 Note"));
+		assert.ok(html.includes("Start a focused study session on your notes"));
+	});
+
 
 	it("renders Ask mode with scope indicator and custom placeholder", () => {
 		const html = renderToStaticMarkup(

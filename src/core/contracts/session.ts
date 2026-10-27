@@ -36,16 +36,20 @@ export const createStudySessionRequestSchema = z.object({
 
 export type CreateStudySessionRequest = z.infer<typeof createStudySessionRequestSchema>;
 
-export interface StudySessionResponse {
-	sessionId: string;
-	title: string;
-	scope: StudyScope;
-	createdAt: string;
-}
+export type {
+	StudySessionResponse,
+	StudySessionRequest,
+	StudySessionMode,
+	GraphSnapshotSummary,
+} from "./study.ts";
 
-export const studySessionResponseSchema = z.object({
-	sessionId: z.string().min(1),
-	title: z.string().min(1),
-	scope: studyScopeSchema,
-	createdAt: z.string().min(1),
-});
+export {
+	studySessionResponseSchema,
+	studySessionRequestSchema,
+	studySessionModeSchema,
+	graphSnapshotSummarySchema,
+	InvalidStudySessionError,
+	validateStudySessionRequest,
+	validateStudySessionResponse,
+} from "./study.ts";
+
