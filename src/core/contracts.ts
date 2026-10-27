@@ -21,5 +21,7 @@ export * from "./contracts/obsidian.ts";
 export * from "./contracts/chunker.ts";
 export * from "./contracts/indexing.ts";
 export * from "./contracts/evidence.ts";
+export * from "./contracts/reconciler.ts";
 export * from "./contracts/scope.ts";
 export * from "./contracts/session.ts";
+
