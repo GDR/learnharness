@@ -66,5 +66,8 @@ export * from "../store/graph-generation.ts";
 export * from "./scope.ts";
 // Source-Aware Retrieval & Ranking (Milestone D Slice 2).
 export * from "./retrieval/index.ts";
+// Scoped Study Sessions Engine (Milestone D Slice 4).
+export * from "./study-session.ts";
+
 
 

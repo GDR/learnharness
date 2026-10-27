@@ -3,6 +3,8 @@
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
+import type { ComposerMode } from "./composer-actions";
+
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -76,21 +78,28 @@ export function Composer({
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
-	/** Active composer mode: "chat" or "ask" (Ask Sources) */
-	mode?: "chat" | "ask";
+	/** Active composer mode: "chat", "study", or "ask" (Ask Sources) */
+	mode?: ComposerMode;
 	/** Callback when mode is switched */
-	onModeChange?: (mode: "chat" | "ask") => void;
+	onModeChange?: (mode: ComposerMode) => void;
 }) {
 	const effectivePlaceholder =
 		placeholder ??
 		(mode === "ask"
 			? "Ask a question grounded in your Obsidian notes…"
+			: mode === "study"
+			? "Start a focused study session on your notes…"
 			: "Ask, answer, or steer the lesson…");
 
 	const handleTextChange = (v: string) => {
 		if (v.startsWith("/ask ") && mode !== "ask" && onModeChange) {
 			onModeChange("ask");
 			onChange(v.slice(5));
+			return;
+		}
+		if (v.startsWith("/study ") && mode !== "study" && onModeChange) {
+			onModeChange("study");
+			onChange(v.slice(7));
 			return;
 		}
 		onChange(v);
@@ -100,6 +109,9 @@ export function Composer({
 		if (value.startsWith("/ask ") && mode !== "ask" && onModeChange) {
 			onModeChange("ask");
 			onChange(value.slice(5));
+		} else if (value.startsWith("/study ") && mode !== "study" && onModeChange) {
+			onModeChange("study");
+			onChange(value.slice(7));
 		}
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();

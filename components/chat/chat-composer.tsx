@@ -56,7 +56,7 @@ export function ChatComposer({
 					<ComposerModeToggle mode={activeMode} onChange={handleModeChange} />
 				}
 				scope={
-					activeMode === "ask" ? (
+					(activeMode === "ask" || activeMode === "study") ? (
 						<StudyScopeIndicator scope={scope} onClick={onScopeClick} />
 					) : undefined
 				}

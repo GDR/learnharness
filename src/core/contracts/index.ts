@@ -25,4 +25,5 @@ export * from "./session.ts";
 export * from "./generation.ts";
 export * from "./retrieval.ts";
 export * from "./ask.ts";
+export * from "./study.ts";
 
