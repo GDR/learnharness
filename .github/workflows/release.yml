@@ -115,12 +115,18 @@ jobs:
           cache: npm
       # The mac icon is the Icon Composer document (build/icon.icon);
       # compiling it requires actool ≥ 26 (Xcode 26.3 on macos-15).
-      # On macOS 15, actool's ictool helper links against macOS 26 private
-      # frameworks (IconRendering, RenderBox, CoreSVG, CoreUI, IconServices,
-      # IconFoundation) that Xcode 26 bundles inside MacOSX.platform's
-      # AssetRuntime. Wrapping Xcode's actool with DYLD_FRAMEWORK_PATH
-      # pointed at AssetRuntime avoids the SIP /usr/bin stub stripping DYLD_*
-      # and lets ictool/ibtoold load Xcode 26's bundled frameworks on macos-15.
+      # On macOS 15:
+      # 1. actool's ictool helper links against macOS 26 private frameworks
+      #    (IconRendering, RenderBox, CoreSVG, CoreUI, IconServices,
+      #    IconFoundation) bundled inside MacOSX.platform's AssetRuntime.
+      #    Wrapping Xcode's actool with DYLD_FRAMEWORK_PATH pointed at
+      #    AssetRuntime avoids the SIP /usr/bin stub stripping DYLD_* and
+      #    lets ictool/ibtoold load Xcode 26's bundled frameworks.
+      # 2. AssetCatalogAgent-AssetRuntime (the out-of-process LAR helper)
+      #    aborts on macOS 15 via IBAssertLARDenyListIfNeeded() because
+      #    macOS 15 system frameworks transitively pull in AVFoundation.
+      #    Setting IBICLightweightAssetRuntimeMode=DISABLED makes ibtoold
+      #    compile Assets.car in-process using the AssetRuntime frameworks.
       - name: Select Xcode 26.3 for actool (mac icon compile)
         if: runner.os == 'macOS'
         uses: maxim-lobanov/setup-xcode@v1
@@ -138,11 +144,15 @@ jobs:
           #!/bin/sh
           DEV_DIR="$(xcode-select -p)"
           export DYLD_FRAMEWORK_PATH="$DEV_DIR/Platforms/MacOSX.platform/System/AssetRuntime/System/Library/PrivateFrameworks"
+          export IBICLightweightAssetRuntimeMode="DISABLED"
+          if [ "$1" = "--version" ]; then
+            exec "$DEV_DIR/usr/bin/actool" "$@" 2>/dev/null
+          fi
           exec "$DEV_DIR/usr/bin/actool" "$@"
           EOF
           chmod +x "$WRAPPER_DIR/actool"
           echo "$WRAPPER_DIR" >> "$GITHUB_PATH"
-          killall ibtoold 2>/dev/null || true
+          killall ibtoold AssetCatalogAgent-AssetRuntime 2>/dev/null || true
           xcodebuild -version
           "$WRAPPER_DIR/actool" --version
       - run: npm ci
