@@ -68,6 +68,8 @@ export * from "./scope.ts";
 export * from "./retrieval/index.ts";
 // Scoped Study Sessions Engine (Milestone D Slice 4).
 export * from "./study-session.ts";
+// Scoped Practice Sets & Warning Evaluation (Milestone D Slice 5).
+export * from "./practice.ts";
 
 
 

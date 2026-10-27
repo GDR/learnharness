@@ -89,6 +89,8 @@ export function Composer({
 			? "Ask a question grounded in your Obsidian notes…"
 			: mode === "study"
 			? "Start a focused study session on your notes…"
+			: mode === "practice"
+			? "Practice problems and recall from your notes…"
 			: "Ask, answer, or steer the lesson…");
 
 	const handleTextChange = (v: string) => {
@@ -102,6 +104,11 @@ export function Composer({
 			onChange(v.slice(7));
 			return;
 		}
+		if (v.startsWith("/practice ") && mode !== "practice" && onModeChange) {
+			onModeChange("practice");
+			onChange(v.slice(10));
+			return;
+		}
 		onChange(v);
 	};
 
@@ -112,6 +119,9 @@ export function Composer({
 		} else if (value.startsWith("/study ") && mode !== "study" && onModeChange) {
 			onModeChange("study");
 			onChange(value.slice(7));
+		} else if (value.startsWith("/practice ") && mode !== "practice" && onModeChange) {
+			onModeChange("practice");
+			onChange(value.slice(10));
 		}
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();

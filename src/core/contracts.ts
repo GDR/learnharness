@@ -28,4 +28,5 @@ export * from "./contracts/generation.ts";
 export * from "./contracts/retrieval.ts";
 export * from "./contracts/ask.ts";
 export * from "./contracts/study.ts";
+export * from "./contracts/practice.ts";
 
