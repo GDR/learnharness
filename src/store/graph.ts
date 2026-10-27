@@ -46,6 +46,25 @@ import type {
 	CoverageEntry,
 	SessionCheckpoint,
 } from "../core/contracts.ts";
+import type { SourceEvidence } from "../core/contracts/evidence.ts";
+import {
+	sourceEvidenceSchema,
+	computeEvidenceDedupKey,
+	validateSourceEvidence,
+} from "../core/contracts/evidence.ts";
+import type {
+	ProjectGenerationRecord,
+	CommitGenerationParams,
+	CommitGenerationResult,
+	RecoveryReport,
+} from "../core/contracts/generation.ts";
+import {
+	getProjectGeneration,
+	executeGenerationCommit,
+	rollbackGraphGeneration,
+	recoverGraphStore,
+	recoverGraphStoreSync,
+} from "./graph-generation.ts";
 import type { GraphStore } from "../core/ports.ts";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -106,6 +125,7 @@ export function createGraphStore(graphDir: string = PATHS.graph): GraphStore {
 	const sourcesFile = path.join(resolvedGraphDir, "sources.json");
 	const positionsFile = path.join(resolvedGraphDir, "positions.json");
 	const formatFile = path.join(resolvedGraphDir, "format.json");
+	const evidenceFile = path.join(resolvedGraphDir, "evidence.jsonl");
 
 	// Purge legacy ledgers in this graphDir
 	for (const legacy of ["edges.jsonl", "events.jsonl"]) {
@@ -118,6 +138,13 @@ export function createGraphStore(graphDir: string = PATHS.graph): GraphStore {
 		} catch (err) {
 			console.warn(`[graph-store] could not purge legacy ledger ${file}:`, err);
 		}
+	}
+
+	// Milestone C Slice 6: Automatically recover consistency and initialize generation baseline on boot
+	try {
+		recoverGraphStoreSync(resolvedGraphDir);
+	} catch (err) {
+		console.warn(`[graph-store] auto-recovery warning on ${resolvedGraphDir}:`, err);
 	}
 
 	function appendLine<T>(file: string, record: T): void {
@@ -201,6 +228,163 @@ export function createGraphStore(graphDir: string = PATHS.graph): GraphStore {
 		writeAtomicJsonSync(sourcesFile, map);
 	}
 
+	let evidenceLoaded = false;
+	const evidenceList: SourceEvidence[] = [];
+	const evidenceById = new Map<string, SourceEvidence>();
+	const evidenceByProposition = new Map<string, SourceEvidence[]>();
+	const evidenceByDocument = new Map<string, SourceEvidence[]>();
+	const evidenceBySource = new Map<string, SourceEvidence[]>();
+	const evidenceDedupMap = new Map<string, SourceEvidence>();
+
+	let evidenceLock = Promise.resolve();
+	function withEvidenceLock<T>(fn: () => Promise<T> | T): Promise<T> {
+		const next = evidenceLock.then(fn, fn);
+		evidenceLock = next.then(() => {}, () => {});
+		return next;
+	}
+
+	function indexEvidenceRecord(ev: SourceEvidence): void {
+		evidenceList.push(ev);
+		evidenceById.set(ev.id, ev);
+		evidenceDedupMap.set(computeEvidenceDedupKey(ev), ev);
+
+		const propList = evidenceByProposition.get(ev.propositionId) ?? [];
+		propList.push(ev);
+		evidenceByProposition.set(ev.propositionId, propList);
+
+		const docList = evidenceByDocument.get(ev.documentId) ?? [];
+		docList.push(ev);
+		evidenceByDocument.set(ev.documentId, docList);
+
+		const srcList = evidenceBySource.get(ev.sourceId) ?? [];
+		srcList.push(ev);
+		evidenceBySource.set(ev.sourceId, srcList);
+	}
+
+	function rebuildEvidenceIndices(records: SourceEvidence[]): void {
+		evidenceList.length = 0;
+		evidenceById.clear();
+		evidenceByProposition.clear();
+		evidenceByDocument.clear();
+		evidenceBySource.clear();
+		evidenceDedupMap.clear();
+		for (const rec of records) {
+			indexEvidenceRecord(rec);
+		}
+	}
+
+	function ensureEvidenceLoaded(): void {
+		if (evidenceLoaded) return;
+		evidenceLoaded = true;
+		rebuildEvidenceIndices([]);
+		if (!fs.existsSync(evidenceFile)) return;
+
+		const rawLines = readRawLines(evidenceFile);
+		for (const raw of rawLines) {
+			const parsed = sourceEvidenceSchema.safeParse(raw);
+			if (parsed.success) {
+				const ev = parsed.data;
+				const existingById = evidenceById.get(ev.id);
+				const dedupKey = computeEvidenceDedupKey(ev);
+				const existingByDedup = evidenceDedupMap.get(dedupKey);
+
+				if (existingById) {
+					existingById.status = ev.status;
+					Object.assign(existingById, ev);
+					continue;
+				}
+				if (existingByDedup && existingByDedup.status !== ev.status) {
+					existingByDedup.status = ev.status;
+				}
+				indexEvidenceRecord(ev);
+			}
+		}
+	}
+
+	async function appendEvidenceBatch(records: SourceEvidence[]): Promise<void> {
+		return withEvidenceLock(async () => {
+			ensureEvidenceLoaded();
+			const toAppend: SourceEvidence[] = [];
+			for (const raw of records) {
+				const ev = validateSourceEvidence(raw);
+				const dedupKey = computeEvidenceDedupKey(ev);
+				const existingById = evidenceById.get(ev.id);
+				const existingByDedup = evidenceDedupMap.get(dedupKey);
+
+				if (existingById && existingById.status === ev.status) {
+					continue;
+				}
+				if (existingByDedup && existingByDedup.status === ev.status) {
+					continue;
+				}
+
+				if (existingById && existingById.status !== ev.status) {
+					existingById.status = ev.status;
+					Object.assign(existingById, ev);
+					toAppend.push(ev);
+					continue;
+				}
+
+				if (existingByDedup && existingByDedup.status !== ev.status) {
+					existingByDedup.status = ev.status;
+				}
+
+				indexEvidenceRecord(ev);
+				toAppend.push(ev);
+			}
+
+			if (toAppend.length > 0) {
+				fs.mkdirSync(path.dirname(evidenceFile), { recursive: true });
+				ensureGraphFormat(formatFile);
+				const payload = toAppend.map((ev) => JSON.stringify(ev)).join("\n") + "\n";
+				fs.appendFileSync(evidenceFile, payload, "utf-8");
+			}
+		});
+	}
+
+	async function appendEvidence(evidence: SourceEvidence | SourceEvidence[]): Promise<void> {
+		const list = Array.isArray(evidence) ? evidence : [evidence];
+		return appendEvidenceBatch(list);
+	}
+
+	async function getEvidenceForProposition(propositionId: string): Promise<SourceEvidence[]> {
+		ensureEvidenceLoaded();
+		const list = evidenceByProposition.get(propositionId) ?? [];
+		return list.map((ev) => ({ ...ev }));
+	}
+
+	async function getEvidenceForDocument(documentId: string): Promise<SourceEvidence[]> {
+		ensureEvidenceLoaded();
+		const list = evidenceByDocument.get(documentId) ?? [];
+		return list.map((ev) => ({ ...ev }));
+	}
+
+	async function getEvidenceForSource(sourceId: string): Promise<SourceEvidence[]> {
+		ensureEvidenceLoaded();
+		const list = evidenceBySource.get(sourceId) ?? [];
+		return list.map((ev) => ({ ...ev }));
+	}
+
+	async function readEvidence(options?: { status?: "active" | "superseded" }): Promise<SourceEvidence[]> {
+		ensureEvidenceLoaded();
+		const filtered = options?.status
+			? evidenceList.filter((ev) => ev.status === options.status)
+			: evidenceList;
+		return filtered.map((ev) => ({ ...ev }));
+	}
+
+	async function removeEvidenceForDocument(documentId: string): Promise<void> {
+		return withEvidenceLock(async () => {
+			ensureEvidenceLoaded();
+			const remaining = evidenceList.filter((ev) => ev.documentId !== documentId);
+			rebuildEvidenceIndices(remaining);
+			fs.mkdirSync(path.dirname(evidenceFile), { recursive: true });
+			ensureGraphFormat(formatFile);
+			const body = remaining.map((ev) => JSON.stringify(ev)).join("\n") + (remaining.length > 0 ? "\n" : "");
+			writeAtomicFileSync(evidenceFile, body);
+		});
+	}
+
 	return {
 		appendNode(node: GraphNode): void {
 			appendLine(nodesFile, node);
@@ -256,25 +440,74 @@ export function createGraphStore(graphDir: string = PATHS.graph): GraphStore {
 			writePositionMap(positions);
 		},
 
+		appendEvidence,
+		appendEvidenceBatch,
+		getEvidenceForProposition,
+		getEvidenceForDocument,
+		getEvidenceForSource,
+		readEvidence,
+		removeEvidenceForDocument,
+
 		rewriteLedgers(next: {
 			nodes?: GraphNode[];
 			chains?: GraphChain[];
 			coverage?: CoverageEntry[];
 			checkpoints?: SessionCheckpoint[];
+			evidence?: SourceEvidence[];
 		}): void {
-			const files = {
-				nodes: nodesFile,
-				chains: chainsFile,
-				coverage: coverageFile,
-				checkpoints: sessionsFile,
-			} as const;
-			for (const [key, records] of Object.entries(next) as [keyof typeof files, unknown[]][]) {
-				const file = files[key];
-				const body = records.map((record) => JSON.stringify(record)).join("\n") + (records.length > 0 ? "\n" : "");
-				writeAtomicFileSync(file, body);
+			if (next.nodes) {
+				const body = next.nodes.map((r) => JSON.stringify(r)).join("\n") + (next.nodes.length > 0 ? "\n" : "");
+				writeAtomicFileSync(nodesFile, body);
+			}
+			if (next.chains) {
+				const body = next.chains.map((r) => JSON.stringify(r)).join("\n") + (next.chains.length > 0 ? "\n" : "");
+				writeAtomicFileSync(chainsFile, body);
+			}
+			if (next.coverage) {
+				const body = next.coverage.map((r) => JSON.stringify(r)).join("\n") + (next.coverage.length > 0 ? "\n" : "");
+				writeAtomicFileSync(coverageFile, body);
+			}
+			if (next.checkpoints) {
+				const body = next.checkpoints.map((r) => JSON.stringify(r)).join("\n") + (next.checkpoints.length > 0 ? "\n" : "");
+				writeAtomicFileSync(sessionsFile, body);
+			}
+			if (next.evidence) {
+				ensureEvidenceLoaded();
+				rebuildEvidenceIndices(next.evidence);
+				fs.mkdirSync(path.dirname(evidenceFile), { recursive: true });
+				ensureGraphFormat(formatFile);
+				const body = next.evidence.map((record) => JSON.stringify(record)).join("\n") + (next.evidence.length > 0 ? "\n" : "");
+				writeAtomicFileSync(evidenceFile, body);
 			}
 		},
+
+		async getGeneration(): Promise<ProjectGenerationRecord> {
+			return getProjectGeneration(resolvedGraphDir);
+		},
+
+		async commitGeneration(params: CommitGenerationParams): Promise<CommitGenerationResult> {
+			const res = await executeGenerationCommit(resolvedGraphDir, params);
+			evidenceLoaded = false;
+			ensureEvidenceLoaded();
+			return res;
+		},
+
+		async rollbackGeneration(targetGeneration?: number): Promise<ProjectGenerationRecord> {
+			const res = await rollbackGraphGeneration(resolvedGraphDir, targetGeneration);
+			evidenceLoaded = false;
+			ensureEvidenceLoaded();
+			return res;
+		},
+
+		async recoverConsistency(): Promise<RecoveryReport> {
+			const report = await recoverGraphStore(resolvedGraphDir);
+			evidenceLoaded = false;
+			ensureEvidenceLoaded();
+			return report;
+		},
+
 	};
 }
+
 
 export const graphStore: GraphStore = createGraphStore(PATHS.graph);

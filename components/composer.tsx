@@ -3,6 +3,8 @@
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
+import type { ComposerMode } from "./composer-actions";
+
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -46,9 +48,11 @@ export function Composer({
 	autoFocus,
 	inputRef,
 	onEscape,
-	placeholder = "Ask, answer, or steer the lesson…",
+	placeholder,
 	nextProblem = false,
 	onNext,
+	mode = "chat",
+	onModeChange,
 }: {
 	busy: boolean;
 	value: string;
@@ -74,8 +78,51 @@ export function Composer({
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
+	/** Active composer mode: "chat", "study", or "ask" (Ask Sources) */
+	mode?: ComposerMode;
+	/** Callback when mode is switched */
+	onModeChange?: (mode: ComposerMode) => void;
 }) {
+	const effectivePlaceholder =
+		placeholder ??
+		(mode === "ask"
+			? "Ask a question grounded in your Obsidian notes…"
+			: mode === "study"
+			? "Start a focused study session on your notes…"
+			: mode === "practice"
+			? "Practice problems and recall from your notes…"
+			: "Ask, answer, or steer the lesson…");
+
+	const handleTextChange = (v: string) => {
+		if (v.startsWith("/ask ") && mode !== "ask" && onModeChange) {
+			onModeChange("ask");
+			onChange(v.slice(5));
+			return;
+		}
+		if (v.startsWith("/study ") && mode !== "study" && onModeChange) {
+			onModeChange("study");
+			onChange(v.slice(7));
+			return;
+		}
+		if (v.startsWith("/practice ") && mode !== "practice" && onModeChange) {
+			onModeChange("practice");
+			onChange(v.slice(10));
+			return;
+		}
+		onChange(v);
+	};
+
 	const act = () => {
+		if (value.startsWith("/ask ") && mode !== "ask" && onModeChange) {
+			onModeChange("ask");
+			onChange(value.slice(5));
+		} else if (value.startsWith("/study ") && mode !== "study" && onModeChange) {
+			onModeChange("study");
+			onChange(value.slice(7));
+		} else if (value.startsWith("/practice ") && mode !== "practice" && onModeChange) {
+			onModeChange("practice");
+			onChange(value.slice(10));
+		}
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
 		else if (action === "send") onSend();
@@ -93,7 +140,7 @@ export function Composer({
 			<textarea
 				ref={inputRef}
 				value={value}
-				onChange={(e) => onChange(e.target.value)}
+				onChange={(e) => handleTextChange(e.target.value)}
 				onKeyDown={(e) => {
 					// Esc ends dictation before anything else Esc might someday mean
 					// here (the dictate decisions: click-again or Esc to stop).
@@ -113,7 +160,7 @@ export function Composer({
 						act();
 					}
 				}}
-				placeholder={placeholder}
+				placeholder={effectivePlaceholder}
 				autoFocus={autoFocus}
 				rows={1}
 				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"

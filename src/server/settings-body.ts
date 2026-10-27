@@ -12,6 +12,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { SEARCH_ENGINE_IDS, type SearchEngineId } from "../core/search.ts";
 import { isHexColor, type ChatSettings } from "../core";
 import type {
 	AgentSettings,
@@ -23,7 +24,7 @@ import type {
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CONTEXT_WINDOW_CEILING, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -177,10 +178,10 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		const search = asRecord(raw.search);
 		if (!search) return { ok: false, error: "search must be an object" };
 		if (search.engine !== undefined) {
-			if (search.engine !== "tavily" && search.engine !== "brave") {
-				return { ok: false, error: 'search.engine must be "tavily" or "brave"' };
+			if (typeof search.engine !== "string" || !(SEARCH_ENGINE_IDS as readonly string[]).includes(search.engine)) {
+				return { ok: false, error: `search.engine must be one of ${SEARCH_ENGINE_IDS.map((id) => `"${id}"`).join(", ")}` };
 			}
-			settings.search = { engine: search.engine };
+			settings.search = { engine: search.engine as SearchEngineId };
 		}
 	}
 	// Prober graph tools (wave 7, owner ruling 2026-09-23): an agent-section
@@ -221,7 +222,7 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { mode?, background?, fontFamily?, proseFontSize?,
- *  sessionNameSerif?, mdRendering? } */
+ *  sessionNameSerif?, autoCollapseQuestions?, mdRendering? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -259,6 +260,12 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			return { ok: false, error: "sessionNameSerif must be a boolean" };
 		}
 		settings.sessionNameSerif = raw.sessionNameSerif;
+	}
+	if (raw.autoCollapseQuestions !== undefined) {
+		if (typeof raw.autoCollapseQuestions !== "boolean") {
+			return { ok: false, error: "autoCollapseQuestions must be a boolean" };
+		}
+		settings.autoCollapseQuestions = raw.autoCollapseQuestions;
 	}
 	if (raw.mdRendering !== undefined) {
 		const md = asRecord(raw.mdRendering);
@@ -384,6 +391,18 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 			};
 		}
 		settings.thresholdTokens = floored;
+	}
+	if (raw.contextWindows !== undefined) {
+		const windows = asRecord(raw.contextWindows);
+		if (!windows) return { ok: false, error: "contextWindows must be an object" };
+		const parsed: Record<string, number> = {};
+		for (const [key, value] of Object.entries(windows)) {
+			if (!/^chatgpt:[^\s:]+:[^\s:]+$/.test(key) || key.length > 512 || typeof value !== "number" || !Number.isSafeInteger(value) || value < COMPACTION_THRESHOLD_FLOOR || value > CONTEXT_WINDOW_CEILING) {
+				return { ok: false, error: `contextWindows must contain ChatGPT model ids and integer limits between ${COMPACTION_THRESHOLD_FLOOR} and ${CONTEXT_WINDOW_CEILING}` };
+			}
+			parsed[key] = value;
+		}
+		if (Object.keys(parsed).length) settings.contextWindows = parsed;
 	}
 	return { ok: true, settings };
 }

@@ -26,6 +26,8 @@ import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
+import { clearOpeningPrompt, readOpeningPrompt } from "@/components/opening-prompt";
+import { calculateDockMaxH } from "@/components/dock-height";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -65,10 +67,12 @@ import {
 	type CompactionDividerData,
 } from "@/components/compaction-divider";
 import { CoverageRing } from "@/components/extraction-coverage";
+import { Button } from "@/components/ui/button";
 import {
 	activeProblemOf,
 	dismissedAnswer,
 	askBeforeCheckVisible,
+	endsInFailedTurn,
 	findPendingToolCall,
 	pendingQuestionCount,
 	phaseAt3,
@@ -82,16 +86,16 @@ import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { slotsConfigured, type ModelsSettings } from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
+import { useAppearance } from "@/components/settings/appearance";
 
-/** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
- * Width tokens (wave-5 reskin, owner decision): the teaching PROSE spans the
- * full session width with a thin px-6 margin; the composer/question DOCK is
- * deliberately narrower (~46rem centered) per the reference. Same ELEMENT,
- * same place — width polish only.
+ * Width tokens: the composer/question DOCK is a centered 46rem column, and
+ * the transcript reads in the same column (#136): full-width prose ran ~300
+ * characters per line on a 2560px window. Sharing the token keeps the text
+ * edges flush with the composer's, and the plan marginalia keeps the flank.
  */
-const COLUMN = "mx-auto w-full max-w-none px-6";
 const DOCK = "mx-auto w-full max-w-[46rem] px-4";
+const COLUMN = DOCK;
 // The DOCK container's fixed width (46rem) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
@@ -253,13 +257,25 @@ export function Chat({
 
 	// New chat with a topic: send the first message exactly once
 	// (initialPromptOwed — the pure gate, pinned in the test suite).
+	// The topic arrives as the server's ?prompt= (old links) or from the
+	// sessionStorage stash the composer wrote before navigating here.
+	// The stash stays until send resolves, so a reload before the POST
+	// lands can retry. sentInitial blocks a second send on this mount.
 	const sentInitial = useRef(false);
 	useEffect(() => {
-		if (!sentInitial.current && initialPromptOwed(initialMessages, initialPrompt)) {
+		const prompt = initialPrompt || readOpeningPrompt(chatId);
+		if (!sentInitial.current && prompt && initialPromptOwed(initialMessages, prompt)) {
 			sentInitial.current = true;
-			void send({ type: "text", text: initialPrompt! });
+			void send({ type: "text", text: prompt }).then(
+				(landed) => {
+					if (landed) clearOpeningPrompt(chatId);
+				},
+				() => {
+					/* leave the stash: the next mount retries */
+				},
+			);
 		}
-	}, [initialPrompt, initialMessages, send]);
+	}, [chatId, initialPrompt, initialMessages, send]);
 
 	// A turn running server-side, attached to no live view of ours (navigate
 	// away mid-turn, or a wake turn discovered mid-session): the reattach
@@ -465,6 +481,12 @@ export function Chat({
 	const busy = localStream || turnInFlight;
 	const busyRef = useRef(busy);
 	busyRef.current = busy;
+	// A failed model call (issue #110): the banner offers Retry, which
+	// re-runs the turn from the saved input — the only path back, since an
+	// answered question cannot be answered again. Offered from "error" too:
+	// a dropped stream leaves the model there, and send() recovers from it.
+	const retryable = (status === "ready" || status === "error") && !busy && endsInFailedTurn(nativeMessages);
+	const retryFailedTurn = () => void send({ type: "retry" });
 
 	// The attach handoff (stream-reattach wave): the moment a resumed
 	// stream takes over the rendering — the SDK left "ready", so
@@ -1344,7 +1366,7 @@ export function Chat({
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
-					<ConversationContent className="min-h-full gap-0 p-0">
+					<ConversationContent className="min-h-full gap-0 p-0 [container-type:inline-size]">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
@@ -1466,7 +1488,7 @@ export function Chat({
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
-									<MessageContent className="w-full">
+									<MessageContent className="w-full overflow-visible">
 											{m.parts.map((part, pi) => {
 												const isLastPart = mi === messages.length - 1 && pi === m.parts.length - 1;
 												// The step boundary where teaching begins (round 8): when
@@ -1602,8 +1624,13 @@ export function Chat({
 								</span>
 							)}
 							{error && (
-								<div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
-									Something went wrong: {error.message}
+								<div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
+									<span>Something went wrong: {error.message}</span>
+									{retryable && (
+										<Button variant="outline" size="xs" data-testid="retry-failed-turn" onClick={retryFailedTurn}>
+											Retry
+										</Button>
+									)}
 								</div>
 							)}
 						</div>
@@ -1802,7 +1829,8 @@ export function Chat({
  *  2026-10-02 abort chain proper (question before turn). */
 export type EscAbortTarget = "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
 	/**
- * Does the ?prompt topic still owe its first send? The gate is "no real
+ * Does the opening topic still owe its first send? The topic is the
+ * server's ?prompt= or the sessionStorage stash. The gate is "no real
  * conversation yet" (no user/assistant message) — NOT emptiness: a
  * session started with map picks carries a graph-context MARKER as
  * message[0], and that scaffolding must never swallow the first send
@@ -2021,6 +2049,8 @@ function DockOverlay({
 	pendingRef.current = !!pending || !!practice;
 	const requiresRevealRef = useRef(requiresReveal);
 	requiresRevealRef.current = requiresReveal;
+	const autoCollapseRef = useRef(true);
+	autoCollapseRef.current = useAppearance().appearance.autoCollapseQuestions;
 	const revealedRef = useRef(revealed);
 	revealedRef.current = revealed;
 
@@ -2069,8 +2099,10 @@ function DockOverlay({
 	// The same measure owns the QUESTION/PROBLEM HEIGHT CAP (owner round,
 	// 2026-10-05): the old fixed fractions (55dvh / 40vh) cut long problems
 	// off absurdly short — the cap is now the AVAILABLE COLUMN (the
-	// scroller already starts below the top bar) minus a 2rem breathing
-	// gap, carried as --dock-max-h for the docks' scroll areas.
+	// scroller already starts below the top bar) minus the dock chrome
+	// reserve (calculateDockMaxH: confidence slider, thinking form, stats
+	// bar, and breathing gap), carried as --dock-max-h for the docks'
+	// scroll areas.
 	const [sbInset, setSbInset] = useState(0);
 	const [dockMaxH, setDockMaxH] = useState<number | null>(null);
 	useEffect(() => {
@@ -2078,7 +2110,7 @@ function DockOverlay({
 		if (!el) return;
 		const measure = () => {
 			setSbInset(Math.round((el.offsetWidth - el.clientWidth) / 2));
-			setDockMaxH(Math.max(el.clientHeight - 32, 160));
+			setDockMaxH(calculateDockMaxH(el.clientHeight));
 		};
 		measure();
 		window.addEventListener("resize", measure);
@@ -2241,7 +2273,7 @@ function DockOverlay({
 				// folded on stick-to-bottom's catch-up transients; a real fold
 				// needs the distance AND stick-to-bottom agreeing the learner
 				// left the bottom.
-				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
+				if (autoCollapseRef.current && d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
 			} else if (d < EXPAND_DIST) {
 				// Teach checks stay collapsed until the learner opens them (W5): the
 				// at-bottom auto-expand would pop the form over the teaching.

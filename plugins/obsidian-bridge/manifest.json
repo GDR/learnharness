@@ -1,0 +1,9 @@
+{
+  "id": "learnharness-bridge",
+  "name": "LearnHarness Bridge",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Bridge plugin connecting Obsidian notes to LearnHarness workspace learning sessions and graphs.",
+  "author": "LearnHarness",
+  "isDesktopOnly": true
+}

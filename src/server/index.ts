@@ -54,4 +54,22 @@ export * from "./sources.ts";
 export { createVaultRegistry, getVaultRegistry, setVaultRegistry } from "../store/vaults.ts";
 export { createSourceStore } from "../store/sources.ts";
 export { runLegacyMigration } from "./migration/legacy-migration.ts";
+// Document Inventory & Scanner (Milestone C Slice 1).
+export * from "./indexing/scanner.ts";
+// Durable Indexing State Machine & Queue (Milestone C Slice 3).
+export * from "./indexing/queue.ts";
+// Graph Reconciliation Engine (Milestone C Slice 5).
+export * from "./indexing/reconciler.ts";
+// Generation Transaction Manager & Crash Recovery Engine (Milestone C Slice 6).
+export * from "../store/graph-generation.ts";
+// StudyScope Server Resolution (Milestone D Slice 1).
+export * from "./scope.ts";
+// Source-Aware Retrieval & Ranking (Milestone D Slice 2).
+export * from "./retrieval/index.ts";
+// Scoped Study Sessions Engine (Milestone D Slice 4).
+export * from "./study-session.ts";
+// Scoped Practice Sets & Warning Evaluation (Milestone D Slice 5).
+export * from "./practice.ts";
+
+
 

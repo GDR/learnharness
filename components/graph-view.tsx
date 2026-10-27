@@ -76,6 +76,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import { MenuShell } from "@/components/menu-shell.tsx";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
+import { PropositionOpenNote } from "./proposition-open-note.tsx";
 import { Hint } from "@/components/ui/hint";
 import {
 	ARROW_LENGTH_LADDER,
@@ -217,7 +218,7 @@ function tokenHex(cssVar: string): string {
 
 // ---- Component ------------------------------------------------------------
 
-interface Selection {
+export interface Selection {
 	node: GraphNode;
 	/** The sources that touched this node: chat ids (deep-linkable sessions)
 	 *  and notes-source ids ("src_…" — imported files, static entries). */
@@ -958,6 +959,79 @@ export function GraphChromeRow({
 	);
 }
 
+/**
+ * The selected node detail card in the graph view. Exported pure for SSR inspection tests.
+ */
+export function GraphNodeInspectorCard({
+	selected,
+	snapshot,
+	cardRef,
+}: {
+	selected: Selection;
+	snapshot: GraphSnapshot | null;
+	cardRef?: React.Ref<HTMLDivElement>;
+}) {
+	return (
+		<div
+			ref={cardRef}
+			// Positioned imperatively in the layout effect above; hidden
+			// until placed so the flip never flashes in the wrong spot.
+			style={{ visibility: "hidden", left: 0, top: 0 }}
+			// lh-no-drag: the card is placed anywhere on the canvas —
+			// when it lands in the top strip it must stay interactive
+			// over home.tsx's drag surface (2026-09-17).
+			className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
+			data-testid="graph-node-inspector"
+		>
+			<div className="text-sm font-medium leading-snug">{selected.node.name}</div>
+			<div className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>
+			{selected.sourceIds.length > 0 ? (
+				<div className="mt-3 flex flex-col gap-1">
+					<div className="text-xs text-muted-foreground">Sessions</div>
+					{selected.sourceIds.map((sourceId) => {
+						// An imported-notes file: a source file row with interactive deep-link action.
+						if (snapshot?.fileSources?.[sourceId] !== undefined) {
+							const filePath = snapshot.fileSources[sourceId];
+							return (
+								<div key={sourceId} className="flex items-center justify-between gap-1.5">
+									<div className="flex min-w-0 flex-1 items-center gap-1.5">
+										<FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+										<span
+											className="min-w-0 flex-1 truncate px-2 py-1.5 text-sm text-muted-foreground"
+											title={filePath}
+										>
+											{filePath}
+										</span>
+									</div>
+									<PropositionOpenNote
+										filePath={filePath}
+										variant="button"
+										className="shrink-0"
+									/>
+								</div>
+							);
+						}
+						// A real session: deep-linkable provenance.
+						return (
+							<div key={sourceId} className="flex items-center gap-1.5">
+								<Link
+									href={propositionSessionHref(selected.node, sourceId)}
+									scroll={false}
+									className="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+								>
+									{snapshot?.sessions[sourceId] ?? sourceId}
+								</Link>
+							</div>
+						);
+					})}
+				</div>
+			) : (
+				<div className="mt-3 text-xs text-muted-foreground">No sessions recorded.</div>
+			)}
+		</div>
+	);
+}
+
 export function GraphView({
 	chainSelectOpen = false,
 	practiceSelection,
@@ -1638,52 +1712,11 @@ export function GraphView({
 			</div>
 
 			{selected && !isEmpty && (
-				<div
-					ref={cardRef}
-					// Positioned imperatively in the layout effect above; hidden
-					// until placed so the flip never flashes in the wrong spot.
-					style={{ visibility: "hidden", left: 0, top: 0 }}
-					// lh-no-drag: the card is placed anywhere on the canvas —
-					// when it lands in the top strip it must stay interactive
-					// over home.tsx's drag surface (2026-09-17).
-					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
-				>
-					<div className="text-sm font-medium leading-snug">{selected.node.name}</div>
-					<div className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>
-					{selected.sourceIds.length > 0 ? (
-						<div className="mt-3 flex flex-col gap-1">
-							<div className="text-xs text-muted-foreground">Sessions</div>
-							{selected.sourceIds.map((sourceId) => {
-								// An imported-notes file: a STATIC entry — the path,
-								// plain text, never a link (no session to open).
-								if (snapshot?.fileSources?.[sourceId] !== undefined) {
-									return (
-										<div key={sourceId} className="flex items-center gap-1.5">
-											<FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
-											<span className="min-w-0 flex-1 truncate px-2 py-1.5 text-sm text-muted-foreground">
-												{snapshot.fileSources[sourceId]}
-											</span>
-										</div>
-									);
-								}
-								// A real session: deep-linkable provenance.
-								return (
-									<div key={sourceId} className="flex items-center gap-1.5">
-										<Link
-											href={propositionSessionHref(selected.node, sourceId)}
-											scroll={false}
-											className="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
-										>
-											{snapshot?.sessions[sourceId] ?? sourceId}
-										</Link>
-									</div>
-								);
-							})}
-						</div>
-					) : (
-						<div className="mt-3 text-xs text-muted-foreground">No sessions recorded.</div>
-					)}
-				</div>
+				<GraphNodeInspectorCard
+					selected={selected}
+					snapshot={snapshot}
+					cardRef={cardRef}
+				/>
 			)}
 			{/* The chain table overlay (chains-overlay plan, 2026-09-29):
 			    ABSOLUTE INSIDE the graph area (the session-overlay idiom —

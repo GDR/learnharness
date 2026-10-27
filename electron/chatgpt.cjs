@@ -16,6 +16,10 @@ const SCOPES = ["openid", "profile", "email", "offline_access", "resource.invoke
 const REVOCATION_WARNING = "Account disconnected locally. Remote revocation could not be confirmed.";
 const random = () => crypto.randomBytes(32).toString("base64url");
 const fail = (code) => Object.assign(new Error(code), { code });
+const TRANSIENT_TRANSPORT_CODES = new Set([
+	"ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "ECONNREFUSED", "EPIPE",
+	"ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET",
+]);
 const publicError = (err) => ({
 	cancelled: "ChatGPT sign-in cancelled.",
 	timeout: "ChatGPT sign-in timed out. Try again.",
@@ -32,6 +36,7 @@ const publicError = (err) => ({
 }[err?.code] || "ChatGPT sign-in failed. Try again; no API-key fallback was used.");
 
 const nonempty = (v) => typeof v === "string" && v.length > 0 && !/[\x00-\x20\x7f]/.test(v);
+const contextLimit = (v) => Number.isSafeInteger(v) && v > 0 && v <= 10_000_000;
 const planScopes = (tokens) => !!tokens?.accessToken && SCOPES.every((scope) => tokens.scopes.includes(scope));
 /** Reject the entire credential record when its schema is invalid. */
 function validateState(state) {
@@ -213,10 +218,17 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			if (!response.ok) {
 				const body = await response.json().catch(() => ({}));
 				const oauthCode = typeof body.error === "string" ? body.error : body.error?.code;
-				throw Object.assign(fail(oauthCode === "invalid_grant" || response.status === 401 || response.status === 403 ? "expired" : "network"), { oauthCode });
+				throw Object.assign(fail(oauthCode === "invalid_grant" || response.status === 401 || response.status === 403 ? "expired" : "network"), { oauthCode, retryable: response.status >= 500 });
 			}
 			return await response.json();
-		} catch (err) { throw err.code ? err : fail("network"); }
+		} catch (err) {
+			if (err?.code) {
+				if (!options.signal?.aborted && TRANSIENT_TRANSPORT_CODES.has(err.code)) err.retryable = true;
+				throw err;
+			}
+			const transportFailure = err instanceof TypeError && (!err.cause?.code || TRANSIENT_TRANSPORT_CODES.has(err.cause.code));
+			throw Object.assign(fail("network"), { retryable: !options.signal?.aborted && transportFailure });
+		}
 	}
 	async function identity(idToken, clientId, nonce, expectedSubject) {
 		try {
@@ -420,10 +432,30 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			if (!active()) return modelValue();
 			// Discovery is identity/scope authorization, not an invented model lease.
 			const token = await credential(false);
-			const body = await json(`${RESOURCE}/models`, { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.any([transportAbort.signal, AbortSignal.timeout(15000)]) });
+			const discover = () => json(`${RESOURCE}/models`, { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.any([transportAbort.signal, AbortSignal.timeout(15000)]) });
+			let body;
+			try {
+				body = await discover();
+			} catch (err) {
+				// Retry a transient outage once so it does not empty the catalog and
+				// strand the selected model. Never retry entitlement, rate-limit, or
+				// authority failures.
+				if (!err.retryable) throw err;
+				await new Promise((resolve) => setTimeout(resolve, 150));
+				authorized(false, undefined, token.epoch);
+				if (sequence !== catalogSequence || active()?.id !== token.accountId) throw fail("catalog");
+				body = await discover();
+			}
 			authorized(false, undefined, token.epoch);
 			if (sequence !== catalogSequence || active()?.id !== token.accountId || !Array.isArray(body.models)) throw fail("catalog");
-			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => ({ id: m.slug, name: m.display_name }));
+			// OpenAI's account catalog distinguishes a default context window
+			// from the maximum permitted for an explicit override. Ignore
+			// malformed values instead of borrowing limits from another account.
+			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => {
+				const contextWindow = contextLimit(m.context_window) ? m.context_window : undefined;
+				const maxContextWindow = contextWindow !== undefined && contextLimit(m.max_context_window) && m.max_context_window >= contextWindow ? m.max_context_window : undefined;
+				return { id: m.slug, name: m.display_name, ...(contextWindow !== undefined ? { contextWindow } : {}), ...(maxContextWindow !== undefined ? { maxContextWindow } : {}) };
+			});
 			const changed = JSON.stringify(visible) !== JSON.stringify(catalog);
 			catalog = visible;
 			if (changed) authorityRevision++;

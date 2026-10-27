@@ -84,3 +84,42 @@ export * from "./coverage.ts";
 export * from "./session-markdown.ts";
 // Project validation and audit lock (Milestone A). Pure, browser-safe.
 export * from "./audit-lock.ts";
+// Obsidian Markdown AST and Feature Parser (Milestone B). Pure, browser-safe.
+export * from "./obsidian/parser.ts";
+// Obsidian Deep-Links, Wiki-Link Resolution, Backlinks & Rename Refactoring (Milestone B). Pure, browser-safe.
+export * from "./obsidian/deeplink.ts";
+// Document Inventory & Scanner Contracts (Milestone C Slice 1). Pure, browser-safe.
+export * from "./contracts/indexing.ts";
+// Section-Aware Markdown Chunker (Milestone C). Pure, browser-safe.
+export {
+	chunkObsidianDocument,
+	estimateMarkdownTokens,
+} from "./obsidian/chunker.ts";
+// Graph Reconciliation Contracts (Milestone C Slice 5). Pure, browser-safe.
+export * from "./contracts/reconciler.ts";
+// StudyScope & Session Contracts (Milestone D Slice 1). Pure, browser-safe.
+export * from "./contracts/scope.ts";
+export * from "./contracts/session.ts";
+// Generation Counter & Atomic Commit Contracts (Milestone C Slice 6). Pure, browser-safe.
+export * from "./contracts/generation.ts";
+// Source-Aware Retrieval & Ranking (Milestone D Slice 2). Pure, browser-safe.
+export * from "./contracts/retrieval.ts";
+export {
+	computeLineRange,
+	tokenizeText,
+	filterQueryTokens,
+	generateMatchHighlights,
+	calculateRobertsonSpärckJonesIdf,
+	STOP_WORDS,
+} from "./retrieval/scoring.ts";
+// Ask Sources Domain Contracts (Milestone D Slice 3). Pure, browser-safe.
+export * from "./contracts/ask.ts";
+// Scoped Study Sessions Domain Contracts (Milestone D Slice 4). Pure, browser-safe.
+export * from "./contracts/study.ts";
+// Scoped Practice Sets & Warning Indicators Domain Contracts (Milestone D Slice 5). Pure, browser-safe.
+export * from "./contracts/practice.ts";
+
+
+
+
+
