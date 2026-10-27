@@ -40,6 +40,7 @@ import type {
 	MigrationCheckpoint,
 } from "./contracts/project.ts";
 export type { MigrationCheckpoint };
+import type { SourceEvidence } from "./contracts/evidence.ts";
 import type { UserSettings } from "./settings.ts";
 import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/local-agents.ts";
 
@@ -127,6 +128,21 @@ export interface GraphStore {
 	/** Replace the whole ledger (the settle is a full-graph computation). */
 	writePositions(positions: Record<string, Position>): void;
 
+	/** Append one or more SourceEvidence records to the project's evidence ledger. */
+	appendEvidence?(evidence: SourceEvidence | SourceEvidence[]): Promise<void>;
+	/** Append a batch of SourceEvidence records to the project's evidence ledger. */
+	appendEvidenceBatch?(evidenceList: SourceEvidence[]): Promise<void>;
+	/** Query evidence records supporting a given proposition. */
+	getEvidenceForProposition?(propositionId: string): Promise<SourceEvidence[]>;
+	/** Query evidence records extracted from a given document. */
+	getEvidenceForDocument?(documentId: DocumentId | string): Promise<SourceEvidence[]>;
+	/** Query evidence records originating from a given source. */
+	getEvidenceForSource?(sourceId: SourceId | string): Promise<SourceEvidence[]>;
+	/** Read all evidence records in append order, optionally filtered by status. */
+	readEvidence?(options?: { status?: "active" | "superseded" }): Promise<SourceEvidence[]>;
+	/** Remove all evidence records associated with a document (optional seam). */
+	removeEvidenceForDocument?(documentId: DocumentId | string): Promise<void>;
+
 	/** THE DESTRUCTIVE SEAM (session-deletion wave 6, owner 2026-09-22 —
 	 *  the first non-append operation on these ledgers): atomically
 	 *  replace the full contents of any subset of the six rewritable
@@ -140,8 +156,10 @@ export interface GraphStore {
 		chains?: GraphChain[];
 		coverage?: CoverageEntry[];
 		checkpoints?: SessionCheckpoint[];
+		evidence?: SourceEvidence[];
 	}): void;
 }
+
 
 // ─── JobStore — background sub-agent jobs (data/jobs) ─────────────────────────
 
