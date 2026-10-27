@@ -30,7 +30,9 @@ import {
 	getProjectGeneration,
 	executeGenerationCommit,
 	recoverGraphStore,
+	recoverGraphStoreSync,
 	rollbackGraphGeneration,
+	hasTornTail,
 	validatePreCommitInvariants,
 } from "../src/store/graph-generation.ts";
 import { createGraphStore } from "../src/store/graph.ts";
@@ -640,6 +642,154 @@ describe("Milestone C Slice 6: Atomic Commits & Crash Safety", () => {
 			const evidenceAfter = await graphStore.readEvidence!();
 			assert.equal(evidenceAfter.length, 1);
 			assert.equal(evidenceAfter[0]!.id, "ev_gen1");
+		});
+
+		it("Test 4.5: Post-commit crash recovery preserves committed generation and purges staging without restoring backup", async () => {
+			const node = makeNode("n_post_crash", "Post-commit statement");
+			const ev = makeEvidence("ev_post_crash", "n_post_crash", "doc_post");
+			const commitRes = await graphStore.commitGeneration!({
+				projectId,
+				nodesToAppend: [node],
+				evidenceBatch: [ev],
+			});
+			assert.equal(commitRes.generation, 1);
+
+			const nodesFile = path.join(graphDir, "nodes.jsonl");
+			const evidenceFile = path.join(graphDir, "evidence.jsonl");
+			const committedNodesContent = fs.readFileSync(nodesFile, "utf-8");
+			const committedEvidenceContent = fs.readFileSync(evidenceFile, "utf-8");
+			assert.ok(committedNodesContent.length > 0);
+
+			// Simulate crash after writing generation.json but before purging .staging:
+			// generation.json is at generation 1, live files contain committed data,
+			// but .staging contains leftover backup-gen-0 (empty) and journal.json in "swapping" stage
+			const stagingDir = path.join(graphDir, ".staging");
+			const backupDir = path.join(stagingDir, "backup-gen-0");
+			fs.mkdirSync(backupDir, { recursive: true });
+			fs.writeFileSync(path.join(backupDir, "nodes.jsonl"), "");
+			fs.writeFileSync(path.join(backupDir, "evidence.jsonl"), "");
+
+			const lingeringJournal: CommitJournalRecord = {
+				projectId,
+				targetGeneration: 1,
+				previousGeneration: 0,
+				commitId: commitRes.commitId,
+				stage: "swapping",
+				status: "staged",
+				startedAt: new Date().toISOString(),
+				stagingDir: path.join(stagingDir, "gen-1"),
+				backupDir,
+				stagedFiles: {},
+			};
+			fs.writeFileSync(path.join(stagingDir, "journal.json"), JSON.stringify(lingeringJournal));
+
+			// Verify recovery via both sync and async APIs
+			// 1. Sync recovery (e.g. boot time)
+			const syncReport = recoverGraphStoreSync(graphDir);
+			assert.equal(syncReport.action, "verified", "Recovery must verify committed generation without rolling back");
+			assert.equal(syncReport.generation, 1);
+			assert.ok(!fs.existsSync(stagingDir), "Staging directory must be purged");
+			assert.equal(fs.readFileSync(nodesFile, "utf-8"), committedNodesContent, "Committed nodes must NOT be wiped by backup");
+			assert.equal(fs.readFileSync(evidenceFile, "utf-8"), committedEvidenceContent, "Committed evidence must NOT be wiped by backup");
+
+			// Plant lingering journal again to test async recoverGraphStore
+			fs.mkdirSync(stagingDir, { recursive: true });
+			fs.writeFileSync(path.join(stagingDir, "journal.json"), JSON.stringify(lingeringJournal));
+			fs.mkdirSync(backupDir, { recursive: true });
+			fs.writeFileSync(path.join(backupDir, "nodes.jsonl"), "");
+
+			const asyncReport = await recoverGraphStore(graphDir);
+			assert.equal(asyncReport.action, "verified");
+			assert.equal(asyncReport.generation, 1);
+			assert.ok(!fs.existsSync(stagingDir));
+			assert.equal(fs.readFileSync(nodesFile, "utf-8"), committedNodesContent);
+
+			// Manifest and store checks
+			const rebootStore = createGraphStore(graphDir);
+			const gen = await rebootStore.getGeneration!();
+			assert.equal(gen.generation, 1);
+			assert.equal(rebootStore.readNodes().length, 1);
+			assert.equal(rebootStore.readNodes()[0]!.id, "n_post_crash");
+		});
+
+		it("Test 4.6: Multi-line torn tail with corrupt first line and valid second line is detected and repaired", async () => {
+			const node = makeNode("n_base_line", "Base committed statement");
+			const ev = makeEvidence("ev_base_line", "n_base_line", "doc_base");
+			await graphStore.commitGeneration!({
+				projectId,
+				nodesToAppend: [node],
+				evidenceBatch: [ev],
+			});
+
+			const nodesFile = path.join(graphDir, "nodes.jsonl");
+			const committedOffset = fs.statSync(nodesFile).size;
+
+			// Append two uncommitted lines:
+			// Line 1: Corrupt JSON ending in newline
+			// Line 2: Valid JSON ending in newline
+			const corruptLine = '{"id":"torn_syntax_corrupt": invalid_json}\n';
+			const validLine = JSON.stringify(makeNode("n_second_line", "Second statement")) + "\n";
+			fs.appendFileSync(nodesFile, corruptLine + validLine);
+
+			assert.ok(fs.statSync(nodesFile).size > committedOffset);
+
+			// Direct unit test of hasTornTail
+			const isTorn = hasTornTail(nodesFile, committedOffset);
+			assert.equal(isTorn, true, "hasTornTail must detect corrupt line even if subsequent lines parse validly");
+
+			// Test recovery repairs the file
+			const report = recoverGraphStoreSync(graphDir);
+			assert.equal(report.action, "repaired");
+			assert.equal(fs.statSync(nodesFile).size, committedOffset, "File must be truncated back to committed offset");
+
+			const rebootStore = createGraphStore(graphDir);
+			const nodes = rebootStore.readNodes();
+			assert.equal(nodes.length, 1);
+			assert.equal(nodes[0]!.id, "n_base_line");
+		});
+
+		it("Test 4.7: Mutex protection serializes rollbackGraphGeneration and concurrent commits under project audit lock", async () => {
+			const node1 = makeNode("n_lock_1", "Statement 1");
+			const ev1 = makeEvidence("ev_lock_1", "n_lock_1", "doc_lock_1");
+			await graphStore.commitGeneration!({
+				projectId,
+				nodesToAppend: [node1],
+				evidenceBatch: [ev1],
+			});
+
+			const node2 = makeNode("n_lock_2", "Statement 2");
+			const ev2 = makeEvidence("ev_lock_2", "n_lock_2", "doc_lock_2");
+			await graphStore.commitGeneration!({
+				projectId,
+				nodesToAppend: [node2],
+				evidenceBatch: [ev2],
+			});
+
+			const currentGen = await graphStore.getGeneration!();
+			assert.equal(currentGen.generation, 2);
+
+			// Concurrently invoke rollback to generation 1 and commit to append a new node
+			const rollbackPromise = rollbackGraphGeneration(graphDir, 1);
+			const commitPromise = executeGenerationCommit(graphDir, {
+				projectId,
+				nodesToAppend: [makeNode("n_concurrent", "Concurrent proposition")],
+				evidenceBatch: [makeEvidence("ev_concurrent", "n_concurrent", "doc_concurrent", { projectId })],
+			});
+
+			const [resRollback, resCommit] = await Promise.all([rollbackPromise, commitPromise]);
+			assert.ok(resRollback);
+			assert.ok(resCommit);
+
+			// Verify store consistency: manifest is valid and files match snapshot checksums
+			const genAfter = await getProjectGeneration(graphDir, projectId);
+			assert.ok(genAfter.generation >= 1);
+
+			const nodesSnap = computeLedgerSnapshot(path.join(graphDir, "nodes.jsonl"));
+			const evSnap = computeLedgerSnapshot(path.join(graphDir, "evidence.jsonl"));
+			assert.equal(genAfter.snapshots.nodes.byteOffset, nodesSnap.byteOffset);
+			assert.equal(genAfter.snapshots.evidence.byteOffset, evSnap.byteOffset);
+			assert.equal(genAfter.snapshots.nodes.sha256, nodesSnap.sha256);
+			assert.equal(genAfter.snapshots.evidence.sha256, evSnap.sha256);
 		});
 	});
 

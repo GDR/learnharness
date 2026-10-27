@@ -356,6 +356,8 @@ export async function executeGenerationCommit(
 
 		const nodesToAppend = params.nodesToAppend ?? [];
 		const evidenceBatch = params.evidenceBatch ?? [];
+		// Note: chainsToAppend is declared in CommitGenerationParams contract for multi-ledger sessions;
+		// Milestone C atomic reconciliation operates strictly on nodes and evidence ledgers.
 
 		// Read existing node IDs
 		const existingNodeIds = readExistingNodeIds(nodesFile);
@@ -537,9 +539,9 @@ export async function executeGenerationCommit(
 
 /**
  * Checks whether uncommitted bytes appended beyond committedOffset contain a torn line.
- * A torn append is characterized by a missing trailing newline or an incomplete last line.
+ * A torn append is characterized by a missing trailing newline or any corrupt/incomplete line in the tail.
  */
-function hasTornTail(filePath: string, committedOffset: number): boolean {
+export function hasTornTail(filePath: string, committedOffset: number): boolean {
 	const buffer = fs.readFileSync(filePath);
 	if (buffer.length <= committedOffset) return false;
 	// Incomplete write: lacks trailing newline delimiter
@@ -547,13 +549,14 @@ function hasTornTail(filePath: string, committedOffset: number): boolean {
 	const tail = buffer.subarray(committedOffset).toString("utf-8");
 	const lines = tail.split("\n").filter((l) => l.trim().length > 0);
 	if (lines.length === 0) return false;
-	const lastLine = lines[lines.length - 1]!;
-	try {
-		JSON.parse(lastLine);
-		return false;
-	} catch {
-		return true;
+	for (const line of lines) {
+		try {
+			JSON.parse(line);
+		} catch {
+			return true;
+		}
 	}
+	return false;
 }
 
 /**
@@ -598,15 +601,22 @@ export async function recoverGraphStore(graphDir: string): Promise<RecoveryRepor
 		try {
 			const journal = JSON.parse(fs.readFileSync(journalFile, "utf-8")) as CommitJournalRecord;
 			if (journal.stage !== "committed") {
-				if (fs.existsSync(journal.backupDir)) {
-					restoreFromBackup(graphDir, journal.backupDir);
+				if (currentGen && currentGen.generation >= journal.targetGeneration) {
+					// The authoritative commit point (writing generation.json) succeeded before crash.
+					// Do NOT restore from backup! Simply purge leftover staging directory.
+					fs.rmSync(stagingDir, { recursive: true, force: true });
+				} else {
+					// Commit point was not reached; restore from backup and purge staging.
+					if (fs.existsSync(journal.backupDir)) {
+						restoreFromBackup(graphDir, journal.backupDir);
+					}
+					fs.rmSync(stagingDir, { recursive: true, force: true });
+					return {
+						action: "rolled_back",
+						generation: journal.previousGeneration,
+						details: { rolledBackFrom: journal.targetGeneration, commitId: journal.commitId },
+					};
 				}
-				fs.rmSync(stagingDir, { recursive: true, force: true });
-				return {
-					action: "rolled_back",
-					generation: journal.previousGeneration,
-					details: { rolledBackFrom: journal.targetGeneration, commitId: journal.commitId },
-				};
 			}
 		} catch {
 			// Corrupt journal
@@ -673,52 +683,63 @@ export async function recoverGraphStore(graphDir: string): Promise<RecoveryRepor
 
 /**
  * Explicit programmatic rollback to a previous generation (or generation - 1).
+ * Protected under project audit lock to guarantee serialization with concurrent commits.
  */
 export async function rollbackGraphGeneration(
 	graphDir: string,
 	targetGeneration?: number,
 ): Promise<ProjectGenerationRecord> {
-	const currentGen = await getProjectGeneration(graphDir);
-	const targetGen = targetGeneration !== undefined ? targetGeneration : currentGen.generation - 1;
-
-	if (targetGen < 0) {
-		throw new Error(`Cannot rollback to negative generation ${targetGen}`);
+	let projectId: string;
+	try {
+		projectId = validateProjectId(resolveProjectIdFromGraphDir(graphDir));
+	} catch {
+		projectId = "default";
 	}
+	const lock = getProjectAuditLock(projectId);
 
-	const snapshotDir = path.join(graphDir, ".snapshots", `gen-${targetGen}`);
-	const targetGenFile = path.join(snapshotDir, "generation.json");
+	return lock(async () => {
+		const currentGen = await getProjectGeneration(graphDir, projectId);
+		const targetGen = targetGeneration !== undefined ? targetGeneration : currentGen.generation - 1;
 
-	if (!fs.existsSync(targetGenFile)) {
-		throw new Error(
-			`Cannot rollback to generation ${targetGen}: snapshot not found at ${snapshotDir}`,
-		);
-	}
+		if (targetGen < 0) {
+			throw new Error(`Cannot rollback to negative generation ${targetGen}`);
+		}
 
-	const restoredRecord = readGenerationRecord(targetGenFile);
-	if (!restoredRecord) {
-		throw new Error(`Corrupted generation record at ${targetGenFile}`);
-	}
+		const snapshotDir = path.join(graphDir, ".snapshots", `gen-${targetGen}`);
+		const targetGenFile = path.join(snapshotDir, "generation.json");
 
-	const nodesBackup = path.join(snapshotDir, "nodes.jsonl");
-	const evidenceBackup = path.join(snapshotDir, "evidence.jsonl");
-	const canonicalNodes = path.join(graphDir, "nodes.jsonl");
-	const canonicalEvidence = path.join(graphDir, "evidence.jsonl");
+		if (!fs.existsSync(targetGenFile)) {
+			throw new Error(
+				`Cannot rollback to generation ${targetGen}: snapshot not found at ${snapshotDir}`,
+			);
+		}
 
-	if (fs.existsSync(nodesBackup)) {
-		fs.copyFileSync(nodesBackup, canonicalNodes);
-	} else if (fs.existsSync(canonicalNodes)) {
-		fs.truncateSync(canonicalNodes, 0);
-	}
+		const restoredRecord = readGenerationRecord(targetGenFile);
+		if (!restoredRecord) {
+			throw new Error(`Corrupted generation record at ${targetGenFile}`);
+		}
 
-	if (fs.existsSync(evidenceBackup)) {
-		fs.copyFileSync(evidenceBackup, canonicalEvidence);
-	} else if (fs.existsSync(canonicalEvidence)) {
-		fs.truncateSync(canonicalEvidence, 0);
-	}
+		const nodesBackup = path.join(snapshotDir, "nodes.jsonl");
+		const evidenceBackup = path.join(snapshotDir, "evidence.jsonl");
+		const canonicalNodes = path.join(graphDir, "nodes.jsonl");
+		const canonicalEvidence = path.join(graphDir, "evidence.jsonl");
 
-	writeGenerationRecord(path.join(graphDir, "generation.json"), restoredRecord);
+		if (fs.existsSync(nodesBackup)) {
+			fs.copyFileSync(nodesBackup, canonicalNodes);
+		} else if (fs.existsSync(canonicalNodes)) {
+			fs.truncateSync(canonicalNodes, 0);
+		}
 
-	return restoredRecord;
+		if (fs.existsSync(evidenceBackup)) {
+			fs.copyFileSync(evidenceBackup, canonicalEvidence);
+		} else if (fs.existsSync(canonicalEvidence)) {
+			fs.truncateSync(canonicalEvidence, 0);
+		}
+
+		writeGenerationRecord(path.join(graphDir, "generation.json"), restoredRecord);
+
+		return restoredRecord;
+	});
 }
 
 /**
@@ -744,15 +765,22 @@ export function recoverGraphStoreSync(graphDir: string): RecoveryReport {
 		try {
 			const journal = JSON.parse(fs.readFileSync(journalFile, "utf-8")) as CommitJournalRecord;
 			if (journal.stage !== "committed") {
-				if (fs.existsSync(journal.backupDir)) {
-					restoreFromBackup(graphDir, journal.backupDir);
+				if (currentGen && currentGen.generation >= journal.targetGeneration) {
+					// The authoritative commit point (writing generation.json) succeeded before crash.
+					// Do NOT restore from backup! Simply purge leftover staging directory.
+					fs.rmSync(stagingDir, { recursive: true, force: true });
+				} else {
+					// Commit point was not reached; restore from backup and purge staging.
+					if (fs.existsSync(journal.backupDir)) {
+						restoreFromBackup(graphDir, journal.backupDir);
+					}
+					fs.rmSync(stagingDir, { recursive: true, force: true });
+					return {
+						action: "rolled_back",
+						generation: journal.previousGeneration,
+						details: { rolledBackFrom: journal.targetGeneration, commitId: journal.commitId },
+					};
 				}
-				fs.rmSync(stagingDir, { recursive: true, force: true });
-				return {
-					action: "rolled_back",
-					generation: journal.previousGeneration,
-					details: { rolledBackFrom: journal.targetGeneration, commitId: journal.commitId },
-				};
 			}
 		} catch {
 			// Corrupt journal
