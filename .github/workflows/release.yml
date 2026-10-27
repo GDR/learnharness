@@ -145,10 +145,11 @@ jobs:
           DEV_DIR="$(xcode-select -p)"
           export DYLD_FRAMEWORK_PATH="$DEV_DIR/Platforms/MacOSX.platform/System/AssetRuntime/System/Library/PrivateFrameworks"
           export IBICLightweightAssetRuntimeMode="DISABLED"
+          export IBToolNeverDeque="1"
           if [ "$1" = "--version" ]; then
             exec "$DEV_DIR/usr/bin/actool" "$@" 2>/dev/null
           fi
-          exec "$DEV_DIR/usr/bin/actool" "$@"
+          exec "$DEV_DIR/usr/bin/actool" --lightweight-asset-runtime-mode disabled "$@"
           EOF
           chmod +x "$WRAPPER_DIR/actool"
           echo "$WRAPPER_DIR" >> "$GITHUB_PATH"

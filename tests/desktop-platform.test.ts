@@ -285,6 +285,8 @@ describe("desktop release workflow", () => {
 		assert.equal(assetRuntimeStep?.if, "runner.os == 'macOS'");
 		assert.ok(assetRuntimeStep?.run?.includes("Platforms/MacOSX.platform/System/AssetRuntime/System/Library/PrivateFrameworks"));
 		assert.ok(assetRuntimeStep?.run?.includes('IBICLightweightAssetRuntimeMode="DISABLED"'));
+		assert.ok(assetRuntimeStep?.run?.includes('IBToolNeverDeque="1"'));
+		assert.ok(assetRuntimeStep?.run?.includes("--lightweight-asset-runtime-mode disabled"));
 		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
 		assert.ok(buildIndex > xcodeIndex + 1, "select Xcode and configure AssetRuntime before packaging compiles the icon");
 
