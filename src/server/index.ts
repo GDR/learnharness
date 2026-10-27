@@ -56,7 +56,8 @@ export { createSourceStore } from "../store/sources.ts";
 export { runLegacyMigration } from "./migration/legacy-migration.ts";
 // Document Inventory & Scanner (Milestone C Slice 1).
 export * from "./indexing/scanner.ts";
+// Durable Indexing State Machine & Queue (Milestone C Slice 3).
+export * from "./indexing/queue.ts";
 // StudyScope Server Resolution (Milestone D Slice 1).
 export * from "./scope.ts";
-
 
