@@ -5,6 +5,11 @@ import type {
 	StudyFolderCommandPayload,
 	StudySessionResponse,
 	AskQuestionResponse,
+	ProjectSummary,
+	ProjectListResponse,
+	VaultSummary,
+	VaultRegistrationPayload,
+	VaultRegistrationResponse,
 } from "./types.ts";
 import { DEFAULT_BRIDGE_SETTINGS } from "./types.ts";
 
@@ -330,6 +335,112 @@ export class BridgeTransport {
 		return this.executeRequest<AskQuestionResponse>(endpoint, {
 			method: "POST",
 			body,
+		});
+	}
+
+	public async listVaults(options?: { timeoutMs?: number }): Promise<{ vaults: VaultSummary[] }> {
+		return this.executeRequest<{ vaults: VaultSummary[] }>("/api/vaults", {
+			method: "GET",
+			timeoutMs: options?.timeoutMs,
+		});
+	}
+
+	public async getVault(vaultId: string, options?: { timeoutMs?: number }): Promise<{ vault: VaultSummary }> {
+		if (!vaultId || !vaultId.trim()) {
+			throw new BridgeTransportError("vaultId must be a non-empty string", { code: "INVALID_PAYLOAD" });
+		}
+		return this.executeRequest<{ vault: VaultSummary }>(`/api/vaults/${encodeURIComponent(vaultId.trim())}`, {
+			method: "GET",
+			timeoutMs: options?.timeoutMs,
+		});
+	}
+
+	public async registerVault(
+		payload: VaultRegistrationPayload,
+		options?: { timeoutMs?: number },
+	): Promise<VaultRegistrationResponse> {
+		if (!payload || typeof payload !== "object") {
+			throw new BridgeTransportError("Payload must be a valid object", { code: "INVALID_PAYLOAD" });
+		}
+		if (!payload.displayName || !payload.displayName.trim()) {
+			throw new BridgeTransportError("displayName must be a non-empty string", { code: "INVALID_PAYLOAD" });
+		}
+
+		try {
+			return await this.executeRequest<VaultRegistrationResponse>("/api/vaults", {
+				method: "POST",
+				body: payload,
+				timeoutMs: options?.timeoutMs,
+			});
+		} catch (err) {
+			if (err instanceof BridgeTransportError && err.status === 409) {
+				// 409 Conflict: vault already registered. Recover existing vault.
+				if (payload.id) {
+					try {
+						return await this.getVault(payload.id, options);
+					} catch {
+						// fall through to search
+					}
+				}
+				try {
+					const list = await this.listVaults(options);
+					const matched = list.vaults.find(
+						(v) =>
+							(payload.id && v.id === payload.id) ||
+							v.displayName === payload.displayName ||
+							(payload.path && v.bindings?.some((b) => b.rootPath === payload.path)),
+					);
+					if (matched) {
+						return { vault: matched };
+					}
+				} catch {
+					// rethrow original conflict if search fails
+				}
+			}
+			throw err;
+		}
+	}
+
+	public async listProjects(options?: { timeoutMs?: number }): Promise<ProjectListResponse> {
+		return this.executeRequest<ProjectListResponse>("/api/projects", {
+			method: "GET",
+			timeoutMs: options?.timeoutMs,
+		});
+	}
+
+	public async createProject(
+		name: string,
+		description?: string,
+		options?: { timeoutMs?: number },
+	): Promise<{ project: ProjectSummary }> {
+		if (!name || !name.trim()) {
+			throw new BridgeTransportError("Project name cannot be empty", { code: "INVALID_PAYLOAD" });
+		}
+		return this.executeRequest<{ project: ProjectSummary }>("/api/projects", {
+			method: "POST",
+			body: {
+				name: name.trim(),
+				description: description?.trim() || undefined,
+			},
+			timeoutMs: options?.timeoutMs,
+		});
+	}
+
+	public async attachVaultToProject(
+		projectId: string,
+		vaultId: string,
+		options?: { timeoutMs?: number },
+	): Promise<unknown> {
+		if (!projectId || !projectId.trim()) {
+			throw new BridgeTransportError("projectId must be a non-empty string", { code: "INVALID_PAYLOAD" });
+		}
+		if (!vaultId || !vaultId.trim()) {
+			throw new BridgeTransportError("vaultId must be a non-empty string", { code: "INVALID_PAYLOAD" });
+		}
+		return this.executeRequest<unknown>(`/api/projects/${encodeURIComponent(projectId.trim())}/sources`, {
+			method: "POST",
+			body: { vaultId: vaultId.trim() },
+			timeoutMs: options?.timeoutMs,
 		});
 	}
 }

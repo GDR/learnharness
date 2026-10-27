@@ -17,9 +17,11 @@ import type {
 	ObsidianTFolder,
 	StudySessionResponse,
 	AskQuestionResponse,
+	VaultSummary,
 } from "./types.ts";
 import { BridgeTransportError } from "./transport.ts";
 import { AskQuestionModal, confirmLargeFolder, LargeFolderConfirmModal } from "./modals.ts";
+import { ensureVaultRegistered } from "./vault.ts";
 import type { LearnHarnessBridgePlugin } from "./main.ts";
 
 export function showNotice(
@@ -257,8 +259,18 @@ export async function executeStudyFolder(
 		return null;
 	}
 
-	if (noteCount > 50) {
-		const confirmed = await confirmLargeFolder(folder.name, noteCount, confirmHandler);
+	const threshold = plugin.settings.largeFolderThreshold ?? 50;
+	if (noteCount > threshold) {
+		let confirmed: boolean;
+		if (confirmHandler && "open" in confirmHandler && typeof confirmHandler.open === "function") {
+			confirmed = await confirmHandler.open();
+		} else {
+			confirmed = await confirmLargeFolder(folder.name, noteCount, {
+				folderPath: folder.path,
+				projectName: plugin.settings.activeProjectId || "Active Project",
+				confirmHandler: typeof confirmHandler === "function" ? confirmHandler : undefined,
+			});
+		}
 		if (!confirmed) {
 			showNotice(plugin, "LearnHarness: Folder study cancelled.");
 			return null;
@@ -345,3 +357,56 @@ export async function executeAskLearnHarness(
 	void modal.open();
 	return null;
 }
+
+export async function executeRegisterVault(
+	plugin: LearnHarnessBridgePlugin,
+): Promise<VaultSummary | null> {
+	try {
+		const vault = await ensureVaultRegistered(plugin);
+		showNotice(
+			plugin,
+			`LearnHarness: Vault "${vault.displayName}" registered successfully (ID: ${vault.id}).`,
+		);
+		return vault;
+	} catch (err) {
+		handleBridgeError(plugin, err, "register vault");
+		return null;
+	}
+}
+
+export async function executeSelectProject(
+	plugin: LearnHarnessBridgePlugin,
+	targetProjectId?: string,
+): Promise<string | null> {
+	if (targetProjectId !== undefined) {
+		plugin.settings.activeProjectId = targetProjectId.trim() || undefined;
+		await plugin.saveSettings();
+		if (plugin.settings.activeProjectId && plugin.settings.vaultId) {
+			try {
+				await plugin.transport.attachVaultToProject(
+					plugin.settings.activeProjectId,
+					plugin.settings.vaultId,
+				);
+			} catch {
+				// non-blocking
+			}
+		}
+		const label = plugin.settings.activeProjectId || "Active Server Project";
+		showNotice(plugin, `LearnHarness: Target project set to "${label}".`);
+		return plugin.settings.activeProjectId ?? null;
+	}
+
+	try {
+		const res = await plugin.transport.listProjects();
+		const names = res.projects.map((p) => p.name).join(", ");
+		showNotice(
+			plugin,
+			`LearnHarness: Available projects: ${names || "None found."}`,
+		);
+		return plugin.settings.activeProjectId ?? null;
+	} catch (err) {
+		handleBridgeError(plugin, err, "list projects");
+		return null;
+	}
+}
+

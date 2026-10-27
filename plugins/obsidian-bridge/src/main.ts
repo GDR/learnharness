@@ -8,10 +8,12 @@ import type {
 	ObsidianMarkdownView,
 	ObsidianMenu,
 	ObsidianMenuItem,
+	ObsidianSettingTab,
 	ObsidianStatusBarItem,
 	ObsidianTFile,
 	ObsidianTFolder,
 	PluginManifest,
+	VaultSummary,
 } from "./types.ts";
 import { DEFAULT_BRIDGE_SETTINGS } from "./types.ts";
 import { BridgeTransport } from "./transport.ts";
@@ -20,7 +22,11 @@ import {
 	executeStudySelection,
 	executeStudyFolder,
 	executeAskLearnHarness,
+	executeRegisterVault,
+	executeSelectProject,
 } from "./commands.ts";
+import { LearnHarnessSettingTab } from "./settings.ts";
+import { ensureVaultRegistered } from "./vault.ts";
 
 export class LearnHarnessBridgePlugin {
 	public app?: ObsidianApp;
@@ -30,6 +36,8 @@ export class LearnHarnessBridgePlugin {
 	public statusBarItem?: ObsidianStatusBarItem;
 	public commands: Map<string, ObsidianCommand> = new Map();
 	public eventRefs: ObsidianEventRef[] = [];
+	public settingTabs: ObsidianSettingTab[] = [];
+	public settingTab?: LearnHarnessSettingTab;
 	public lastNotice?: string;
 	public notices: string[] = [];
 	public isLoaded = false;
@@ -151,6 +159,35 @@ export class LearnHarnessBridgePlugin {
 			},
 		});
 
+		// Register Vault command
+		this.addCommand({
+			id: "learnharness:register-vault",
+			name: "LearnHarness: Register Current Vault",
+			callback: async () => {
+				return executeRegisterVault(this);
+			},
+		});
+
+		// Select Project command
+		this.addCommand({
+			id: "learnharness:select-project",
+			name: "LearnHarness: Select Target Project",
+			callback: async () => {
+				return executeSelectProject(this);
+			},
+		});
+
+		// Register setting tab
+		this.settingTab = new LearnHarnessSettingTab(this.app, this);
+		this.addSettingTab(this.settingTab);
+
+		// Non-blocking auto-registration if enabled and vaultId not yet recorded
+		if (this.settings.autoRegisterVault !== false && !this.settings.vaultId) {
+			void ensureVaultRegistered(this).catch(() => {
+				// Silently ignore network errors during startup auto-registration
+			});
+		}
+
 		// Register workspace context menus (file-menu and editor-menu)
 		if (this.app?.workspace?.on) {
 			const fileMenuRef = this.app.workspace.on(
@@ -232,7 +269,18 @@ export class LearnHarnessBridgePlugin {
 		this.eventRefs = [];
 
 		this.commands.clear();
+		this.settingTabs = [];
+		this.settingTab = undefined;
 		this.isLoaded = false;
+	}
+
+	public addSettingTab(settingTab: ObsidianSettingTab): ObsidianSettingTab {
+		this.settingTabs.push(settingTab);
+		return settingTab;
+	}
+
+	public async ensureVaultRegistered(): Promise<VaultSummary | null> {
+		return ensureVaultRegistered(this);
 	}
 
 	public async loadSettings(): Promise<BridgeSettings> {

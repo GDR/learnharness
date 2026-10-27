@@ -6,11 +6,13 @@
  * 2. AskQuestionModal: Interactive prompt modal to query LearnHarness with note context.
  */
 
-import type { AskQuestionResponse } from "./types.ts";
+import type { AskQuestionResponse, ProjectSummary } from "./types.ts";
 
 export interface LargeFolderConfirmModalOptions {
 	folderName: string;
 	noteCount: number;
+	folderPath?: string;
+	projectName?: string;
 	onConfirm?: () => void;
 	onCancel?: () => void;
 }
@@ -18,6 +20,8 @@ export interface LargeFolderConfirmModalOptions {
 export class LargeFolderConfirmModal {
 	public folderName: string;
 	public noteCount: number;
+	public folderPath?: string;
+	public projectName?: string;
 	public isOpen = false;
 	public confirmed: boolean | null = null;
 	public containerEl?: HTMLElement;
@@ -28,9 +32,22 @@ export class LargeFolderConfirmModal {
 		}
 	};
 
-	constructor(folderName: string, noteCount: number) {
-		this.folderName = folderName;
-		this.noteCount = noteCount;
+	constructor(
+		folderNameOrOptions: string | LargeFolderConfirmModalOptions,
+		noteCount = 0,
+		options?: Partial<LargeFolderConfirmModalOptions>,
+	) {
+		if (typeof folderNameOrOptions === "object" && folderNameOrOptions !== null) {
+			this.folderName = folderNameOrOptions.folderName;
+			this.noteCount = folderNameOrOptions.noteCount;
+			this.folderPath = folderNameOrOptions.folderPath;
+			this.projectName = folderNameOrOptions.projectName;
+		} else {
+			this.folderName = folderNameOrOptions;
+			this.noteCount = noteCount;
+			this.folderPath = options?.folderPath;
+			this.projectName = options?.projectName;
+		}
 	}
 
 	public open(): Promise<boolean> {
@@ -112,7 +129,30 @@ export class LargeFolderConfirmModal {
 
 		const content = document.createElement("div");
 		content.className = "modal-content";
-		content.textContent = `Folder "${this.folderName}" contains ${this.noteCount} markdown notes. Analyzing a large folder may take a few moments. Do you want to proceed?`;
+
+		const folderInfo = document.createElement("div");
+		folderInfo.className = "learnharness-folder-info";
+		folderInfo.textContent = `Folder: "${this.folderName}"${this.folderPath ? ` (${this.folderPath})` : ""}`;
+
+		const countInfo = document.createElement("div");
+		countInfo.className = "learnharness-count-info";
+		countInfo.textContent = `Contains ${this.noteCount} markdown notes.`;
+
+		if (this.projectName) {
+			const projectInfo = document.createElement("div");
+			projectInfo.className = "learnharness-project-info";
+			projectInfo.textContent = `Target Project: ${this.projectName}`;
+			content.appendChild(projectInfo);
+		}
+
+		const warningText = document.createElement("p");
+		warningText.className = "learnharness-warning-text";
+		warningText.textContent =
+			"Analyzing a large folder will index and extract study evidence across all contained notes. This may take several minutes. Do you want to proceed?";
+
+		content.appendChild(folderInfo);
+		content.appendChild(countInfo);
+		content.appendChild(warningText);
 
 		const buttonContainer = document.createElement("div");
 		buttonContainer.className = "modal-button-container";
@@ -143,21 +183,263 @@ export class LargeFolderConfirmModal {
 export async function confirmLargeFolder(
 	folderName: string,
 	noteCount: number,
-	customModalOrHandler?:
+	customModalOrHandlerOrOptions?:
 		| ((folderName: string, count: number) => Promise<boolean>)
-		| LargeFolderConfirmModal,
+		| LargeFolderConfirmModal
+		| {
+				folderPath?: string;
+				projectName?: string;
+				confirmHandler?: (folderName: string, count: number) => Promise<boolean>;
+		  },
 ): Promise<boolean> {
-	if (typeof customModalOrHandler === "function") {
-		return customModalOrHandler(folderName, noteCount);
+	if (typeof customModalOrHandlerOrOptions === "function") {
+		return customModalOrHandlerOrOptions(folderName, noteCount);
 	}
-	if (customModalOrHandler && typeof customModalOrHandler.open === "function") {
-		return customModalOrHandler.open();
+	if (
+		customModalOrHandlerOrOptions &&
+		"confirmHandler" in customModalOrHandlerOrOptions &&
+		typeof customModalOrHandlerOrOptions.confirmHandler === "function"
+	) {
+		return customModalOrHandlerOrOptions.confirmHandler(folderName, noteCount);
+	}
+	if (
+		customModalOrHandlerOrOptions &&
+		"open" in customModalOrHandlerOrOptions &&
+		typeof (customModalOrHandlerOrOptions as LargeFolderConfirmModal).open === "function"
+	) {
+		return (customModalOrHandlerOrOptions as LargeFolderConfirmModal).open();
 	}
 	if (typeof document === "undefined") {
 		return true;
 	}
-	const modal = new LargeFolderConfirmModal(folderName, noteCount);
+	const opts =
+		typeof customModalOrHandlerOrOptions === "object" && customModalOrHandlerOrOptions !== null
+			? customModalOrHandlerOrOptions
+			: undefined;
+	const modal = new LargeFolderConfirmModal(folderName, noteCount, opts);
 	return modal.open();
+}
+
+export interface NewProjectModalOptions {
+	onSubmit?: (
+		name: string,
+		description?: string,
+	) => Promise<{ project: ProjectSummary } | ProjectSummary | unknown>;
+	onSuccess?: (project: ProjectSummary) => void;
+	onCancel?: () => void;
+}
+
+export class NewProjectModal {
+	public isOpen = false;
+	public containerEl?: HTMLElement;
+	public nameInput?: HTMLInputElement;
+	public descInput?: HTMLInputElement | HTMLTextAreaElement;
+	public errorEl?: HTMLElement;
+	public lastCreatedProject?: ProjectSummary;
+	private onSubmit?: (
+		name: string,
+		description?: string,
+	) => Promise<{ project: ProjectSummary } | ProjectSummary | unknown>;
+	private onSuccess?: (project: ProjectSummary) => void;
+	private onCancel?: () => void;
+	private resolvePromise?: (project: ProjectSummary | null) => void;
+	private handleKeyDown = (evt: KeyboardEvent): void => {
+		if (evt.key === "Escape") {
+			this.cancel();
+		}
+	};
+
+	constructor(
+		options?:
+			| NewProjectModalOptions
+			| ((
+					name: string,
+					description?: string,
+			  ) => Promise<{ project: ProjectSummary } | ProjectSummary | unknown>),
+	) {
+		if (typeof options === "function") {
+			this.onSubmit = options;
+		} else if (options) {
+			this.onSubmit = options.onSubmit;
+			this.onSuccess = options.onSuccess;
+			this.onCancel = options.onCancel;
+		}
+	}
+
+	public open(): Promise<ProjectSummary | null> {
+		this.isOpen = true;
+		if (typeof document !== "undefined") {
+			this.render();
+			return new Promise<ProjectSummary | null>((resolve) => {
+				this.resolvePromise = resolve;
+			});
+		}
+		return new Promise<ProjectSummary | null>((resolve) => {
+			this.resolvePromise = resolve;
+			queueMicrotask(() => {
+				if (this.isOpen) {
+					this.isOpen = false;
+					resolve(null);
+				}
+			});
+		});
+	}
+
+	public close(): void {
+		this.isOpen = false;
+		if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+			window.removeEventListener("keydown", this.handleKeyDown);
+		} else if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+			document.removeEventListener("keydown", this.handleKeyDown);
+		}
+		if (this.containerEl) {
+			if (
+				this.containerEl.parentNode &&
+				typeof this.containerEl.parentNode.removeChild === "function"
+			) {
+				this.containerEl.parentNode.removeChild(this.containerEl);
+			} else if (typeof (this.containerEl as { remove?: () => void }).remove === "function") {
+				(this.containerEl as { remove: () => void }).remove();
+			}
+		}
+		this.resolvePromise?.(this.lastCreatedProject ?? null);
+	}
+
+	public cancel(): void {
+		this.onCancel?.();
+		this.close();
+	}
+
+	public async submit(name: string, description?: string): Promise<ProjectSummary | null> {
+		const trimmedName = name?.trim();
+		if (!trimmedName) {
+			const msg = "Project name cannot be empty";
+			if (this.errorEl) {
+				this.errorEl.textContent = msg;
+				this.errorEl.style.display = "block";
+			}
+			return null;
+		}
+
+		try {
+			let created: ProjectSummary | null = null;
+			if (this.onSubmit) {
+				const res = await this.onSubmit(trimmedName, description?.trim() || undefined);
+				if (res && typeof res === "object" && "project" in res) {
+					created = (res as { project: ProjectSummary }).project;
+				} else {
+					created = res as ProjectSummary;
+				}
+			} else {
+				created = {
+					id: `proj_${trimmedName.toLowerCase().replace(/[^a-z0-9_-]+/g, "_")}`,
+					name: trimmedName,
+					description: description?.trim() || undefined,
+				};
+			}
+
+			this.lastCreatedProject = created;
+			this.onSuccess?.(created);
+			this.resolvePromise?.(created);
+			this.close();
+			return created;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (this.errorEl) {
+				this.errorEl.textContent = msg;
+				this.errorEl.style.display = "block";
+			}
+			throw err;
+		}
+	}
+
+	private render(): void {
+		const backdrop = document.createElement("div");
+		backdrop.className = "modal-container mod-dim learnharness-modal-backdrop";
+		backdrop.onclick = (evt: MouseEvent) => {
+			if (evt.target === backdrop) {
+				this.cancel();
+			}
+		};
+
+		if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+			window.addEventListener("keydown", this.handleKeyDown);
+		} else if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+			document.addEventListener("keydown", this.handleKeyDown);
+		}
+
+		const modal = document.createElement("div");
+		modal.className = "modal learnharness-new-project-modal";
+
+		const title = document.createElement("div");
+		title.className = "modal-title";
+		title.textContent = "LearnHarness: Create New Project";
+
+		const content = document.createElement("div");
+		content.className = "modal-content";
+
+		const nameLabel = document.createElement("label");
+		nameLabel.className = "learnharness-label";
+		nameLabel.textContent = "Project Name:";
+		const nameInput = document.createElement("input");
+		nameInput.type = "text";
+		nameInput.className = "learnharness-input project-name-input";
+		nameInput.placeholder = "e.g. Neuroscience 101";
+		this.nameInput = nameInput;
+
+		const descLabel = document.createElement("label");
+		descLabel.className = "learnharness-label";
+		descLabel.textContent = "Description (optional):";
+		const descInput = document.createElement("textarea");
+		descInput.className = "learnharness-textarea project-desc-input";
+		descInput.placeholder = "Optional description for this learning workspace";
+		this.descInput = descInput;
+
+		const errorEl = document.createElement("div");
+		errorEl.className = "learnharness-error-message";
+		errorEl.style.display = "none";
+		errorEl.style.color = "var(--text-error, #d9534f)";
+		this.errorEl = errorEl;
+
+		content.appendChild(nameLabel);
+		content.appendChild(nameInput);
+		content.appendChild(descLabel);
+		content.appendChild(descInput);
+		content.appendChild(errorEl);
+
+		const buttonContainer = document.createElement("div");
+		buttonContainer.className = "modal-button-container";
+
+		const cancelBtn = document.createElement("button");
+		cancelBtn.className = "mod-cancel";
+		cancelBtn.textContent = "Cancel";
+		cancelBtn.onclick = () => this.cancel();
+
+		const createBtn = document.createElement("button");
+		createBtn.className = "mod-cta";
+		createBtn.textContent = "Create Project";
+		createBtn.onclick = async () => {
+			createBtn.disabled = true;
+			try {
+				await this.submit(nameInput.value, descInput.value);
+			} catch {
+				createBtn.disabled = false;
+			}
+		};
+
+		buttonContainer.appendChild(cancelBtn);
+		buttonContainer.appendChild(createBtn);
+
+		modal.appendChild(title);
+		modal.appendChild(content);
+		modal.appendChild(buttonContainer);
+		backdrop.appendChild(modal);
+
+		document.body.appendChild(backdrop);
+		this.containerEl = backdrop;
+
+		setTimeout(() => nameInput.focus?.(), 50);
+	}
 }
 
 export interface AskQuestionModalContext {
