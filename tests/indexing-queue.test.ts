@@ -442,9 +442,106 @@ test("Milestone C Slice 3: Durable Indexing State Machine & Queue", async (t) =>
 			assert.ok(job2.id);
 			assert.notEqual(job2.id, job1.id);
 
-			while (job2.state !== "completed" && job2.state !== "failed") {
+			while (queue.getActiveJobForSource("proj_mutex", src.id) || (job2.state !== "completed" && job2.state !== "failed")) {
 				await new Promise((r) => setTimeout(r, 20));
 			}
+
+			// Subtest: Sequential release without lock stealing under persist delay
+			let persistDelayMs = 0;
+			const originalPersist = queue.persistJob.bind(queue);
+			queue.persistJob = async (job, dataDir) => {
+				if (persistDelayMs > 0 && job.state === "completed") {
+					await new Promise((r) => setTimeout(r, persistDelayMs));
+				}
+				return originalPersist(job, dataDir);
+			};
+
+			persistDelayMs = 50;
+			const raceJob1 = await queue.triggerIndexing({
+				projectId: "proj_mutex",
+				sourceId: src.id,
+				dataDir: tmpDir,
+				projectStore: pStore,
+				vaultRegistry: vRegistry,
+			});
+
+			// Wait until raceJob1 is in completed state (it is now executing persistJob with delay)
+			while (raceJob1.state !== "completed") {
+				await new Promise((r) => setTimeout(r, 10));
+			}
+
+			// During persistJob delay, lock must STILL be held! A trigger MUST reject with 409:
+			await assert.rejects(
+				async () => {
+					await queue.triggerIndexing({
+						projectId: "proj_mutex",
+						sourceId: src.id,
+						dataDir: tmpDir,
+						projectStore: pStore,
+						vaultRegistry: vRegistry,
+					});
+				},
+				(err: unknown) => {
+					assert.ok(err instanceof IndexingConflictError);
+					assert.equal(err.status, 409);
+					assert.equal(err.activeJobId, raceJob1.id);
+					return true;
+				},
+			);
+
+			// Now wait until raceJob1's persistJob finishes and finally block runs
+			while (queue.getActiveJobForSource("proj_mutex", src.id)) {
+				await new Promise((r) => setTimeout(r, 10));
+			}
+
+			// Now raceJob2 can acquire the lock
+			let resolveRaceDeferred: () => void = () => {};
+			const raceDeferred = new Promise<void>((r) => {
+				resolveRaceDeferred = r;
+			});
+
+			const raceJob2 = await queue.triggerIndexing({
+				projectId: "proj_mutex",
+				sourceId: src.id,
+				dataDir: tmpDir,
+				projectStore: pStore,
+				vaultRegistry: vRegistry,
+				hooks: {
+					onValidate: async () => {
+						await raceDeferred;
+					},
+				},
+			});
+			assert.ok(raceJob2.id);
+
+			// Verify raceJob1's terminal finally did not wipe raceJob2's active lock:
+			// A third job on same source MUST reject with 409 activeJobId === raceJob2.id
+			await assert.rejects(
+				async () => {
+					await queue.triggerIndexing({
+						projectId: "proj_mutex",
+						sourceId: src.id,
+						dataDir: tmpDir,
+						projectStore: pStore,
+						vaultRegistry: vRegistry,
+					});
+				},
+				(err: unknown) => {
+					assert.ok(err instanceof IndexingConflictError);
+					assert.equal(err.status, 409);
+					assert.equal(err.activeJobId, raceJob2.id);
+					return true;
+				},
+			);
+
+			// Release raceJob2 and wait for full completion
+			resolveRaceDeferred();
+			while (queue.getActiveJobForSource("proj_mutex", src.id) || (raceJob2.state !== "completed" && raceJob2.state !== "failed")) {
+				await new Promise((r) => setTimeout(r, 20));
+			}
+			assert.equal(raceJob2.state, "completed");
+
+			persistDelayMs = 0;
 		} finally {
 			teardown();
 		}
@@ -491,8 +588,8 @@ test("Milestone C Slice 3: Durable Indexing State Machine & Queue", async (t) =>
 				vaultRegistry: vRegistry,
 			});
 
-			while (initJob.state !== "completed") {
-				await new Promise((r) => setTimeout(r, 30));
+			while (queue.getActiveJobForSource("proj_lifecycle", src.id) || initJob.state !== "completed") {
+				await new Promise((r) => setTimeout(r, 20));
 			}
 			assert.equal(initJob.state, "completed");
 			assert.equal(initJob.stats.added, 2);
@@ -523,7 +620,7 @@ test("Milestone C Slice 3: Durable Indexing State Machine & Queue", async (t) =>
 			});
 
 			// Observe progression
-			while (job.state !== "completed") {
+			while (queue.getActiveJobForSource("proj_lifecycle", src.id) || job.state !== "completed") {
 				if (!observedStages.includes(job.state)) {
 					observedStages.push(job.state);
 				}
@@ -552,6 +649,44 @@ test("Milestone C Slice 3: Durable Indexing State Machine & Queue", async (t) =>
 			assert.equal(stored.state, "completed");
 			assert.equal(stored.stats.added, 1);
 			assert.equal(stored.stats.modified, 1);
+
+			// Subtest: Re-indexing with 0 modifications extracts 0 notes
+			const noModJob = await queue.triggerIndexing({
+				projectId: "proj_lifecycle",
+				sourceId: src.id,
+				dataDir: tmpDir,
+				projectStore: pStore,
+				vaultRegistry: vRegistry,
+			});
+
+			while (queue.getActiveJobForSource("proj_lifecycle", src.id) || (noModJob.state !== "completed" && noModJob.state !== "failed")) {
+				await new Promise((r) => setTimeout(r, 20));
+			}
+
+			assert.equal(noModJob.state, "completed");
+			assert.equal(noModJob.stats.added, 0);
+			assert.equal(noModJob.stats.modified, 0);
+			assert.equal(noModJob.stats.unchanged, 3);
+			assert.equal(noModJob.stats.chunksCreated, 0);
+			assert.equal(noModJob.progress.totalDocuments, 0);
+
+			// Subtest: forceRescan re-extracts all 3 notes
+			const forceJob = await queue.triggerIndexing({
+				projectId: "proj_lifecycle",
+				sourceId: src.id,
+				forceRescan: true,
+				dataDir: tmpDir,
+				projectStore: pStore,
+				vaultRegistry: vRegistry,
+			});
+
+			while (queue.getActiveJobForSource("proj_lifecycle", src.id) || (forceJob.state !== "completed" && forceJob.state !== "failed")) {
+				await new Promise((r) => setTimeout(r, 20));
+			}
+
+			assert.equal(forceJob.state, "completed");
+			assert.equal(forceJob.progress.totalDocuments, 3);
+			assert.ok((forceJob.stats.chunksCreated ?? 0) > 0);
 		} finally {
 			teardown();
 		}
@@ -603,8 +738,9 @@ test("Milestone C Slice 3: Durable Indexing State Machine & Queue", async (t) =>
 				vaultRegistry: vRegistry,
 				hooks: {
 					onValidate: async ({ signal }) => {
+						if (signal?.aborted) return;
 						await new Promise<void>((resolve) => {
-							signal?.addEventListener("abort", () => resolve());
+							signal?.addEventListener("abort", () => resolve(), { once: true });
 							deferred.then(() => resolve());
 						});
 					},
@@ -636,6 +772,9 @@ test("Milestone C Slice 3: Durable Indexing State Machine & Queue", async (t) =>
 				vaultRegistry: vRegistry,
 			});
 			assert.ok(nextJob.id);
+			while (nextJob.state !== "completed" && nextJob.state !== "failed" && nextJob.state !== "canceled") {
+				await new Promise((r) => setTimeout(r, 20));
+			}
 
 			// Test cancelling a job while it is still in queued state
 			const queue1 = new IndexingQueue(1);
@@ -785,6 +924,38 @@ test("Milestone C Slice 3: Durable Indexing State Machine & Queue", async (t) =>
 			const job3 = await queue.getIndexingJob("proj_crash", "job_completed_already", tmpDir);
 			assert.ok(job3);
 			assert.equal(job3.state, "completed"); // Untouched
+
+			// Subtest: Automatic boot recovery via getIndexingQueue(tmpDir)
+			const orphanJob3: IndexingJob = {
+				id: "job_orphan_boot",
+				projectId: "proj_crash",
+				sourceId: "src_boot",
+				state: "scanning",
+				progress: {
+					current: 0,
+					total: 0,
+					currentStage: "scanning",
+				},
+				stats: {
+					added: 0,
+					modified: 0,
+					unchanged: 0,
+					removed: 0,
+					extractedPropositions: 0,
+					elapsedMs: 50,
+				},
+				startedAt: "2026-10-27T03:00:00.000Z",
+			};
+			fs.writeFileSync(path.join(idxDir, `${orphanJob3.id}.json`), JSON.stringify(orphanJob3));
+
+			setIndexingQueue(null);
+			const bootQueue = getIndexingQueue(tmpDir);
+			await bootQueue.recoveryPromise;
+
+			const recoveredBootJob = await bootQueue.getIndexingJob("proj_crash", "job_orphan_boot", tmpDir);
+			assert.ok(recoveredBootJob);
+			assert.equal(recoveredBootJob.state, "failed");
+			assert.equal(recoveredBootJob.error, "Job interrupted by server restart");
 		} finally {
 			teardown();
 		}

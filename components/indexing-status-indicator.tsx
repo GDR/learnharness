@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { IndexingJob, IndexingState } from "@/src/core";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,7 @@ export function IndexingStatusIndicator({
 }: IndexingStatusIndicatorProps) {
 	const [job, setJob] = useState<IndexingJob | null>(initialJob);
 	const [canceling, setCanceling] = useState(false);
+	const lastNotifiedCompletedJobIdRef = useRef<string | null>(null);
 
 	const pollStatus = useCallback(async () => {
 		if (!projectId) return;
@@ -37,13 +38,20 @@ export function IndexingStatusIndicator({
 			if (!res.ok) return;
 
 			const data = await res.json();
-			const active: IndexingJob | null = sourceId ? data.activeJob : data.activeJobs?.[0] ?? null;
+			const active: IndexingJob | null = sourceId
+				? data.activeJob
+				: (data.activeJobs?.[0] ?? data.queuedJobs?.[0] ?? null);
 			const latest: IndexingJob | null = sourceId ? data.latestJob : data.recentJobs?.[0] ?? null;
 
-			const currentJob = active || (latest?.state === "completed" ? latest : null);
+			const currentJob = active || latest || null;
 			setJob(currentJob);
 
-			if (latest?.state === "completed" && onCompleted) {
+			if (
+				latest?.state === "completed" &&
+				onCompleted &&
+				lastNotifiedCompletedJobIdRef.current !== latest.id
+			) {
+				lastNotifiedCompletedJobIdRef.current = latest.id;
 				onCompleted(latest);
 			}
 		} catch {
@@ -176,6 +184,12 @@ export function IndexingStatusIndicator({
 					)}
 				</div>
 			</div>
+
+			{job.state === "queued" && (
+				<p data-testid="indexing-queued-message" className="text-[11px] text-muted-foreground">
+					Queued in background...
+				</p>
+			)}
 
 			{isActive && job.progress.total > 0 && (
 				<div className="flex items-center gap-2">

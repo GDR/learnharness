@@ -22,6 +22,8 @@ import { writeAtomicJson } from "../../core/fs-atomic.ts";
 import {
 	scanSourceDocuments,
 	VaultUnavailableError,
+	loadSourceInventory,
+	saveSourceInventory,
 } from "./scanner.ts";
 import { resolveProjectSource } from "../sources.ts";
 import { getProjectStore } from "../projects.ts";
@@ -103,56 +105,61 @@ export class IndexingQueue {
 		await writeAtomicJson(filePath, job);
 	}
 
+	public recoveryPromise: Promise<number> | null = null;
+
 	/**
 	 * Recovers any non-terminal jobs on server start, marking them as failed.
 	 */
 	public async recoverOrphanedJobs(dataDir?: string): Promise<number> {
-		const baseDir = dataDir
-			? path.resolve(dataDir)
-			: (getProjectStore().dataDir ? path.resolve(getProjectStore().dataDir!) : PATHS.data);
-		const projectsDir = path.join(baseDir, "projects");
-		if (!fs.existsSync(projectsDir)) return 0;
+		this.recoveryPromise = (async () => {
+			const baseDir = dataDir
+				? path.resolve(dataDir)
+				: (getProjectStore().dataDir ? path.resolve(getProjectStore().dataDir!) : PATHS.data);
+			const projectsDir = path.join(baseDir, "projects");
+			if (!fs.existsSync(projectsDir)) return 0;
 
-		let recoveredCount = 0;
-		const projectEntries = await fs.promises.readdir(projectsDir, { withFileTypes: true });
+			let recoveredCount = 0;
+			const projectEntries = await fs.promises.readdir(projectsDir, { withFileTypes: true });
 
-		for (const pEntry of projectEntries) {
-			if (!pEntry.isDirectory()) continue;
-			const idxDir = path.join(projectsDir, pEntry.name, "indexing");
-			if (!fs.existsSync(idxDir)) continue;
+			for (const pEntry of projectEntries) {
+				if (!pEntry.isDirectory()) continue;
+				const idxDir = path.join(projectsDir, pEntry.name, "indexing");
+				if (!fs.existsSync(idxDir)) continue;
 
-			const jobFiles = await fs.promises.readdir(idxDir);
-			for (const f of jobFiles) {
-				if (!f.endsWith(".json")) continue;
-				const fPath = path.join(idxDir, f);
-				try {
-					const raw = await fs.promises.readFile(fPath, "utf-8");
-					const parsed = JSON.parse(raw) as IndexingJob;
-					if (
-						parsed.state === "queued" ||
-						parsed.state === "scanning" ||
-						parsed.state === "extracting" ||
-						parsed.state === "validating" ||
-						parsed.state === "committing"
-					) {
-						parsed.state = "failed";
-						if (parsed.progress) {
-							parsed.progress.stage = "failed";
-							parsed.progress.currentStage = "failed";
+				const jobFiles = await fs.promises.readdir(idxDir);
+				for (const f of jobFiles) {
+					if (!f.endsWith(".json")) continue;
+					const fPath = path.join(idxDir, f);
+					try {
+						const raw = await fs.promises.readFile(fPath, "utf-8");
+						const parsed = JSON.parse(raw) as IndexingJob;
+						if (
+							parsed.state === "queued" ||
+							parsed.state === "scanning" ||
+							parsed.state === "extracting" ||
+							parsed.state === "validating" ||
+							parsed.state === "committing"
+						) {
+							parsed.state = "failed";
+							if (parsed.progress) {
+								parsed.progress.stage = "failed";
+								parsed.progress.currentStage = "failed";
+							}
+							parsed.error = "Job interrupted by server restart";
+							parsed.completedAt = new Date().toISOString();
+							parsed.updatedAt = parsed.completedAt;
+							await writeAtomicJson(fPath, parsed);
+							recoveredCount++;
 						}
-						parsed.error = "Job interrupted by server restart";
-						parsed.completedAt = new Date().toISOString();
-						parsed.updatedAt = parsed.completedAt;
-						await writeAtomicJson(fPath, parsed);
-						recoveredCount++;
+					} catch {
+						// ignore corrupted files
 					}
-				} catch {
-					// ignore corrupted files
 				}
 			}
-		}
 
-		return recoveredCount;
+			return recoveredCount;
+		})();
+		return this.recoveryPromise;
 	}
 
 	/**
@@ -276,6 +283,11 @@ export class IndexingQueue {
 
 				if (abortController.signal.aborted) throw new Error("AbortError");
 
+				const { context } = await resolveProjectSource(job.projectId, job.sourceId, {
+					dataDir: options.dataDir,
+					projectStore: options.projectStore,
+				});
+
 				const scanResult = await scanSourceDocuments({
 					projectId: job.projectId,
 					sourceId: job.sourceId,
@@ -296,11 +308,13 @@ export class IndexingQueue {
 				job.stats.scannedCount = scanResult.scannedCount;
 
 				// STAGE 2: Extracting Changed Notes
-				const changedDocs = options.forceRescan
-					? scanResult.documents.filter((d) => d.status === "active")
-					: scanResult.documents.filter(
-							(d) => d.status === "active" && (scanResult.addedCount > 0 || scanResult.modifiedCount > 0),
-					  );
+				const changedDocs = scanResult.documents.filter((doc) => {
+					if (doc.status !== "active") return false;
+					if (options.forceRescan) return true;
+					if (doc.indexedAt === undefined) return true;
+					if (!doc.updatedAt) return false;
+					return new Date(doc.updatedAt).getTime() > new Date(doc.indexedAt).getTime();
+				});
 
 				job.state = "extracting";
 				job.progress.stage = "extracting";
@@ -351,6 +365,37 @@ export class IndexingQueue {
 					}
 				}
 
+				// Upon completing note extraction, update indexedAt timestamp and persist
+				if (changedDocs.length > 0) {
+					const indexedAtIso = new Date().toISOString();
+					for (const doc of changedDocs) {
+						doc.indexedAt = indexedAtIso;
+					}
+					if (context?.sources) {
+						if (typeof context.sources.upsertDocuments === "function") {
+							await context.sources.upsertDocuments(changedDocs).catch(() => {});
+						} else if (typeof context.sources.upsertDocument === "function") {
+							for (const doc of changedDocs) {
+								await context.sources.upsertDocument(doc).catch(() => {});
+							}
+						}
+					}
+					try {
+						const inv = await loadSourceInventory(job.projectId, job.sourceId, options.dataDir);
+						for (const doc of changedDocs) {
+							const existingDoc = inv[doc.id];
+							if (existingDoc) {
+								existingDoc.indexedAt = doc.indexedAt;
+							} else {
+								inv[doc.id] = doc;
+							}
+						}
+						await saveSourceInventory(job.projectId, job.sourceId, inv, options.dataDir);
+					} catch {
+						// ignore inventory update error
+					}
+				}
+
 				// STAGE 3: Validating (Hook for Slice C.5)
 				if (abortController.signal.aborted) throw new Error("AbortError");
 				job.state = "validating";
@@ -358,6 +403,7 @@ export class IndexingQueue {
 				job.progress.currentStage = "validating";
 				job.updatedAt = new Date().toISOString();
 				await this.persistJob(job, options.dataDir);
+				if (abortController.signal.aborted) throw new Error("AbortError");
 				if (options.hooks?.onValidate) {
 					await options.hooks.onValidate({
 						job,
@@ -374,6 +420,7 @@ export class IndexingQueue {
 				job.progress.currentStage = "committing";
 				job.updatedAt = new Date().toISOString();
 				await this.persistJob(job, options.dataDir);
+				if (abortController.signal.aborted) throw new Error("AbortError");
 				if (options.hooks?.onCommit) {
 					await options.hooks.onCommit({
 						job,
@@ -392,7 +439,6 @@ export class IndexingQueue {
 				job.updatedAt = job.completedAt;
 				job.stats.elapsedMs = Date.now() - startTime;
 				job.stats.durationMs = job.stats.elapsedMs;
-				this.sourceLocks.delete(lockKey);
 				await this.persistJob(job, options.dataDir);
 			} catch (err: unknown) {
 				const isAbort =
@@ -409,8 +455,11 @@ export class IndexingQueue {
 					job.updatedAt = nowStr;
 					job.stats.elapsedMs = Date.now() - startTime;
 					job.stats.durationMs = job.stats.elapsedMs;
-					this.sourceLocks.delete(lockKey);
-					await this.persistJob(job, options.dataDir);
+					try {
+						await this.persistJob(job, options.dataDir);
+					} catch (persistErr) {
+						console.error(`[indexing-queue] failed to persist canceled job ${job.id}:`, persistErr);
+					}
 				} else {
 					job.state = "failed";
 					job.progress.stage = "failed";
@@ -420,11 +469,16 @@ export class IndexingQueue {
 					job.updatedAt = nowStr;
 					job.stats.elapsedMs = Date.now() - startTime;
 					job.stats.durationMs = job.stats.elapsedMs;
-					this.sourceLocks.delete(lockKey);
-					await this.persistJob(job, options.dataDir);
+					try {
+						await this.persistJob(job, options.dataDir);
+					} catch (persistErr) {
+						console.error(`[indexing-queue] failed to persist failed job ${job.id}:`, persistErr);
+					}
 				}
 			} finally {
-				this.sourceLocks.delete(lockKey);
+				if (this.sourceLocks.get(lockKey) === job.id) {
+					this.sourceLocks.delete(lockKey);
+				}
 				this.activeJobs.delete(job.id);
 				void this.drainQueue();
 			}
@@ -493,6 +547,11 @@ export class IndexingQueue {
 			const job = await this.cancelIndexingJob(resolvedProjectId, jobId, dataDir);
 			if (reason && !job.error) {
 				job.error = reason;
+				try {
+					await this.persistJob(job, dataDir);
+				} catch {
+					// ignore persistence errors
+				}
 			}
 			return job;
 		}
@@ -599,8 +658,27 @@ export class IndexingQueue {
 // Global Singleton Instance
 let defaultQueue: IndexingQueue | null = null;
 
-export function getIndexingQueue(maxConcurrency?: number): IndexingQueue {
-	return (defaultQueue ??= new IndexingQueue(maxConcurrency));
+export function getIndexingQueue(
+	dataDirOrMaxConcurrency?: string | number,
+	maybeMaxConcurrency?: number,
+): IndexingQueue {
+	let dataDir: string | undefined;
+	let maxConcurrency: number | undefined;
+
+	if (typeof dataDirOrMaxConcurrency === "number") {
+		maxConcurrency = dataDirOrMaxConcurrency;
+	} else if (typeof dataDirOrMaxConcurrency === "string") {
+		dataDir = dataDirOrMaxConcurrency;
+		maxConcurrency = maybeMaxConcurrency;
+	}
+
+	if (!defaultQueue) {
+		defaultQueue = new IndexingQueue(maxConcurrency);
+		void defaultQueue.recoverOrphanedJobs(dataDir).catch((err) => {
+			console.error("[indexing-queue] failed to recover orphaned jobs on boot:", err);
+		});
+	}
+	return defaultQueue;
 }
 
 export function setIndexingQueue(queue: IndexingQueue | null): void {
