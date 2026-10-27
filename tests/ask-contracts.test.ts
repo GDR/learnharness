@@ -121,6 +121,30 @@ describe("Suite 1: Ask Sources Request Contracts & Validation", () => {
 		);
 	});
 
+	it("rejects query exceeding 10,000 characters with InvalidAskQueryError (400)", () => {
+		assert.throws(
+			() => validateAskSourcesRequest({ query: "x".repeat(10001) }),
+			(err: unknown) => {
+				assert(err instanceof InvalidAskQueryError);
+				assert.equal(err.status, 400);
+				assert.match(err.message, /Query cannot exceed 10,000 characters/);
+				return true;
+			},
+		);
+	});
+
+	it("rejects question exceeding 10,000 characters with InvalidAskQueryError (400)", () => {
+		assert.throws(
+			() => validateAskSourcesRequest({ question: "x".repeat(10001) }),
+			(err: unknown) => {
+				assert(err instanceof InvalidAskQueryError);
+				assert.equal(err.status, 400);
+				assert.match(err.message, /Question cannot exceed 10,000 characters/);
+				return true;
+			},
+		);
+	});
+
 	it("enforces topK bounds (1 <= topK <= MAX_TOP_K)", () => {
 		assert.throws(
 			() => validateAskSourcesRequest({ query: "test", topK: 0 }),

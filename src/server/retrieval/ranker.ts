@@ -210,7 +210,16 @@ export class SectionRanker {
 
 		// 3. Exact Phrase & Grounding Multipliers
 		const isMultiWord = queryTerms.length > 1;
-		const phraseRegex = isMultiWord ? new RegExp(escapeRegex(query.trim()), "i") : null;
+		const phraseRegex =
+			isMultiWord && query.trim().length <= 1000
+				? (() => {
+						try {
+							return new RegExp(escapeRegex(query.trim()), "i");
+						} catch {
+							return null;
+						}
+					})()
+				: null;
 
 		const scoredIndices: Array<{ index: number; score: number }> = [];
 

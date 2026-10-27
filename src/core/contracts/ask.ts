@@ -63,8 +63,8 @@ export interface AskSourcesRequest {
 
 export const askSourcesRequestSchema = z
 	.object({
-		query: z.string().optional(),
-		question: z.string().optional(),
+		query: z.string().max(10000, "Query cannot exceed 10,000 characters").optional(),
+		question: z.string().max(10000, "Question cannot exceed 10,000 characters").optional(),
 		scope: studyScopeSchema.optional(),
 		topK: z
 			.number()

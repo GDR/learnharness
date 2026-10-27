@@ -20,7 +20,12 @@ import {
 	generatePureSynthesisFallback,
 } from "../src/server/index.ts";
 import { POST as postAsk } from "../app/api/projects/[id]/ask/route.ts";
-import type { AskSourcesResponse, RetrievedSection, SourceCitation } from "../src/core/index.ts";
+import {
+	InvalidAskQueryError,
+	type AskSourcesResponse,
+	type RetrievedSection,
+	type SourceCitation,
+} from "../src/core/index.ts";
 import type { PiEngine } from "../src/agent/models.ts";
 
 const FIXTURES_VAULT_PATH = path.resolve("tests/fixtures/obsidian-vault");
@@ -580,5 +585,85 @@ describe("Milestone D Slice 3: Ask Sources API & Grounded Synthesis", () => {
 		assert.equal(result.answer, "Synthesized model answer with citation [1].");
 		assert.equal(result.citations.length, 1);
 		assert.equal(result.citations[0]?.documentPath, "SeamNote.md");
+	});
+
+	it("rejects queries > 10,000 characters with HTTP 400 (InvalidAskQueryError)", async () => {
+		const pStore = createProjectStore(tmpDir);
+		await pStore.createProject({ id: "proj_oversize", name: "Oversized Query Project" });
+
+		// Query > 10,000 chars
+		const queryOver10k = "Schrödinger ".repeat(1000); // 12,000 chars
+		assert.ok(queryOver10k.length > 10000);
+
+		const reqOverQuery = new Request("http://localhost/api/projects/proj_oversize/ask", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ query: queryOver10k }),
+		});
+
+		const resOverQuery = await postAsk(reqOverQuery, { params: Promise.resolve({ id: "proj_oversize" }) });
+		assert.equal(resOverQuery.status, 400);
+		const jsonOverQuery = await resOverQuery.json();
+		assert.match(jsonOverQuery.error, /cannot exceed 10,000 characters/i);
+
+		// Question alias > 10,000 chars
+		const questionOver10k = "Hamiltonian ".repeat(1000); // 12,000 chars
+		assert.ok(questionOver10k.length > 10000);
+
+		const reqOverQuestion = new Request("http://localhost/api/projects/proj_oversize/ask", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ question: questionOver10k }),
+		});
+
+		const resOverQuestion = await postAsk(reqOverQuestion, { params: Promise.resolve({ id: "proj_oversize" }) });
+		assert.equal(resOverQuestion.status, 400);
+		const jsonOverQuestion = await resOverQuestion.json();
+		assert.match(jsonOverQuestion.error, /cannot exceed 10,000 characters/i);
+	});
+
+	it("executes multi-word queries with up to 10,000 characters without throwing 500 error", async () => {
+		const pStore = createProjectStore(tmpDir);
+		await pStore.createProject({ id: "proj_large_safe", name: "Safe Multiword Project" });
+
+		const vRegistry = createVaultRegistry(tmpDir);
+		const vault = await vRegistry.registerVault({
+			id: "vault_safe",
+			displayName: "Safe Vault",
+			kind: "obsidian",
+			bindings: [{ deviceId: "local", rootPath: FIXTURES_VAULT_PATH, status: "available" }],
+		});
+
+		const ctx = await resolveProjectContext("proj_large_safe");
+		const src = await ctx.sources.addSource({ id: "src_s", projectId: "proj_large_safe", vaultId: vault.id });
+		await ctx.sources.upsertDocument({
+			id: "doc_s",
+			projectId: "proj_large_safe",
+			sourceId: src.id,
+			vaultId: vault.id,
+			currentPath: "Physics/Quantum/Schrodinger.md",
+			contentHash: "h_safe",
+			revisionId: "r_safe",
+			status: "active",
+		});
+
+		// Multi-word query of ~8,000 chars (> 1,000 chars, but <= 10,000 chars)
+		const multiWordLarge = "Schrödinger wave equation Hamiltonian ".repeat(200).trim();
+		assert.ok(multiWordLarge.length > 1000 && multiWordLarge.length <= 10000);
+
+		const req = new Request("http://localhost/api/projects/proj_large_safe/ask", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				query: multiWordLarge,
+				topK: 3,
+			}),
+		});
+
+		const res = await postAsk(req, { params: Promise.resolve({ id: "proj_large_safe" }) });
+		assert.equal(res.status, 200);
+		const json = (await res.json()) as AskSourcesResponse;
+		assert.equal(typeof json.answer, "string");
+		assert.ok(Array.isArray(json.citations));
 	});
 });
