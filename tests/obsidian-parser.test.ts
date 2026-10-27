@@ -693,5 +693,83 @@ describe("Milestone B Slice 3: Obsidian Markdown AST & Feature Parser", () => {
 				"[[Quantenmechanik|Волновая механика]]",
 			);
 		});
+
+		it("handles empty frontmatter fences with LF and CRLF", () => {
+			// LF empty frontmatter fence
+			const lfText = "---\n---\n# Title After Empty FM\nParagraph content.\n";
+			const parsedLf = parseObsidianMarkdown(lfText);
+			assert.doesNotThrow(() => validateParsedObsidianDocument(parsedLf));
+			assert.deepEqual(parsedLf.frontmatter, {});
+			assert.ok(parsedLf.frontmatterRange);
+			assert.equal(parsedLf.frontmatterRange.startOffset, 0);
+			assert.equal(parsedLf.frontmatterRange.endOffset, 8);
+			assert.equal(lfText.slice(0, parsedLf.frontmatterRange.endOffset), "---\n---\n");
+			assert.equal(parsedLf.headings.length, 1);
+			assert.equal(parsedLf.headings[0]?.text, "Title After Empty FM");
+			assert.equal(parsedLf.headings[0]?.range.startOffset, 8);
+
+			// CRLF empty frontmatter fence
+			const crlfText = "---\r\n---\r\n# Title After Empty FM CRLF\r\nParagraph content.\r\n";
+			const parsedCrlf = parseObsidianMarkdown(crlfText);
+			assert.doesNotThrow(() => validateParsedObsidianDocument(parsedCrlf));
+			assert.deepEqual(parsedCrlf.frontmatter, {});
+			assert.ok(parsedCrlf.frontmatterRange);
+			assert.equal(parsedCrlf.frontmatterRange.startOffset, 0);
+			assert.equal(parsedCrlf.frontmatterRange.endOffset, 10);
+			assert.equal(crlfText.slice(0, parsedCrlf.frontmatterRange.endOffset), "---\r\n---\r\n");
+			assert.equal(parsedCrlf.headings.length, 1);
+			assert.equal(parsedCrlf.headings[0]?.text, "Title After Empty FM CRLF");
+			assert.equal(parsedCrlf.headings[0]?.range.startOffset, 10);
+		});
+
+		it("handles frontmatter at EOF without trailing newline (LF and CRLF)", () => {
+			// Content at EOF
+			const lfEof = "---\ntitle: EOF Note\n---";
+			const parsedLf = parseObsidianMarkdown(lfEof);
+			assert.doesNotThrow(() => validateParsedObsidianDocument(parsedLf));
+			assert.equal(parsedLf.frontmatter.title, "EOF Note");
+			assert.ok(parsedLf.frontmatterRange);
+			assert.equal(parsedLf.frontmatterRange.startOffset, 0);
+			assert.equal(parsedLf.frontmatterRange.endOffset, lfEof.length);
+
+			const crlfEof = "---\r\ntitle: EOF Note CRLF\r\n---";
+			const parsedCrlf = parseObsidianMarkdown(crlfEof);
+			assert.doesNotThrow(() => validateParsedObsidianDocument(parsedCrlf));
+			assert.equal(parsedCrlf.frontmatter.title, "EOF Note CRLF");
+			assert.ok(parsedCrlf.frontmatterRange);
+			assert.equal(parsedCrlf.frontmatterRange.startOffset, 0);
+			assert.equal(parsedCrlf.frontmatterRange.endOffset, crlfEof.length);
+
+			// Empty fence at EOF without trailing newline
+			const emptyLfEof = "---\n---";
+			const parsedEmptyLf = parseObsidianMarkdown(emptyLfEof);
+			assert.doesNotThrow(() => validateParsedObsidianDocument(parsedEmptyLf));
+			assert.deepEqual(parsedEmptyLf.frontmatter, {});
+			assert.ok(parsedEmptyLf.frontmatterRange);
+			assert.equal(parsedEmptyLf.frontmatterRange.startOffset, 0);
+			assert.equal(parsedEmptyLf.frontmatterRange.endOffset, emptyLfEof.length);
+		});
+
+		it("slugifies headings correctly across emojis, symbols, and leading/trailing hyphens", () => {
+			// Emojis stripped with leading/trailing hyphen removal
+			assert.equal(slugifyHeading("## 🚀 Mission to Mars 2026"), "mission-to-mars-2026");
+			assert.equal(slugifyHeading("🚀 Mission to Mars 2026"), "mission-to-mars-2026");
+			assert.equal(slugifyHeading("# 🚀 Galactic Exploration 🌌"), "galactic-exploration");
+
+			// Symbol-only headings fall back to 'heading'
+			assert.equal(slugifyHeading("### !!! ???"), "heading");
+			assert.equal(slugifyHeading("???"), "heading");
+			assert.equal(slugifyHeading("---"), "heading");
+			assert.equal(slugifyHeading(""), "heading");
+			assert.equal(slugifyHeading("   "), "heading");
+
+			// Leading and trailing hyphens stripped
+			assert.equal(slugifyHeading("--Special Section--"), "special-section");
+			assert.equal(slugifyHeading("---Heading Test---"), "heading-test");
+
+			// Punctuation and Unicode preservation
+			assert.equal(slugifyHeading("E = mc² & Beyond!?"), "e-mc²-beyond");
+			assert.equal(slugifyHeading("Квантовая механика и волновая функция!"), "квантовая-механика-и-волновая-функция");
+		});
 	});
 });

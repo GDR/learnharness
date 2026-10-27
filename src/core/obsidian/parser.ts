@@ -50,7 +50,9 @@ export function slugifyHeading(text: string): string {
 	const normalized = trimmed
 		.toLowerCase()
 		.replace(/[^\p{L}\p{N}\s_-]/gu, "")
-		.replace(/\s+/g, "-");
+		.trim()
+		.replace(/\s+/g, "-")
+		.replace(/^-+|-+$/g, "");
 	return normalized || "heading";
 }
 
@@ -115,22 +117,26 @@ export function parseObsidianMarkdown(
 	let frontmatter: Record<string, unknown> = {};
 	let frontmatterRange: TextRange | undefined;
 
-	// 1. Extract YAML Frontmatter: ^---\r?\n([\s\S]*?)\r?\n---\r?\n
-	const fmMatch = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
-	if (fmMatch && fmMatch[1] !== undefined) {
-		const rawYaml = fmMatch[1];
+	// 1. Extract YAML Frontmatter: ^---\r?\n([\s\S]*?\r?\n)?---(?:\r?\n|$)
+	const fmMatch = markdown.match(/^---\r?\n([\s\S]*?\r?\n)?---(?:\r?\n|$)/);
+	if (fmMatch) {
+		const rawYaml = fmMatch[1] ?? "";
 		frontmatterRange = {
 			startOffset: 0,
 			endOffset: fmMatch[0].length,
 		};
 
-		try {
-			const parsedYaml = yaml.load(rawYaml);
-			if (parsedYaml && typeof parsedYaml === "object" && !Array.isArray(parsedYaml)) {
-				frontmatter = parsedYaml as Record<string, unknown>;
+		if (rawYaml.trim().length > 0) {
+			try {
+				const parsedYaml = yaml.load(rawYaml);
+				if (parsedYaml && typeof parsedYaml === "object" && !Array.isArray(parsedYaml)) {
+					frontmatter = parsedYaml as Record<string, unknown>;
+				}
+			} catch {
+				// Resilient to malformed YAML: preserve empty frontmatter while keeping offset
+				frontmatter = {};
 			}
-		} catch {
-			// Resilient to malformed YAML: preserve empty frontmatter while keeping offset
+		} else {
 			frontmatter = {};
 		}
 
