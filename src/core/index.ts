@@ -100,6 +100,16 @@ export * from "./contracts/reconciler.ts";
 // StudyScope & Session Contracts (Milestone D Slice 1). Pure, browser-safe.
 export * from "./contracts/scope.ts";
 export * from "./contracts/session.ts";
+// Source-Aware Retrieval & Ranking (Milestone D Slice 2). Pure, browser-safe.
+export * from "./contracts/retrieval.ts";
+export {
+	computeLineRange,
+	tokenizeText,
+	filterQueryTokens,
+	generateMatchHighlights,
+	calculateRobertsonSpärckJonesIdf,
+	STOP_WORDS,
+} from "./retrieval/scoring.ts";
 
 
 

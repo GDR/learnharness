@@ -62,5 +62,7 @@ export * from "./indexing/queue.ts";
 export * from "./indexing/reconciler.ts";
 // StudyScope Server Resolution (Milestone D Slice 1).
 export * from "./scope.ts";
+// Source-Aware Retrieval & Ranking (Milestone D Slice 2).
+export * from "./retrieval/index.ts";
 
 
