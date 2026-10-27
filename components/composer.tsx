@@ -46,9 +46,11 @@ export function Composer({
 	autoFocus,
 	inputRef,
 	onEscape,
-	placeholder = "Ask, answer, or steer the lesson…",
+	placeholder,
 	nextProblem = false,
 	onNext,
+	mode = "chat",
+	onModeChange,
 }: {
 	busy: boolean;
 	value: string;
@@ -74,8 +76,31 @@ export function Composer({
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
+	/** Active composer mode: "chat" or "ask" (Ask Sources) */
+	mode?: "chat" | "ask";
+	/** Callback when mode is switched */
+	onModeChange?: (mode: "chat" | "ask") => void;
 }) {
+	const effectivePlaceholder =
+		placeholder ??
+		(mode === "ask"
+			? "Ask a question grounded in your Obsidian notes…"
+			: "Ask, answer, or steer the lesson…");
+
+	const handleTextChange = (v: string) => {
+		if (v.startsWith("/ask ") && mode !== "ask" && onModeChange) {
+			onModeChange("ask");
+			onChange(v.slice(5));
+			return;
+		}
+		onChange(v);
+	};
+
 	const act = () => {
+		if (value.startsWith("/ask ") && mode !== "ask" && onModeChange) {
+			onModeChange("ask");
+			onChange(value.slice(5));
+		}
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
 		else if (action === "send") onSend();
@@ -93,7 +118,7 @@ export function Composer({
 			<textarea
 				ref={inputRef}
 				value={value}
-				onChange={(e) => onChange(e.target.value)}
+				onChange={(e) => handleTextChange(e.target.value)}
 				onKeyDown={(e) => {
 					// Esc ends dictation before anything else Esc might someday mean
 					// here (the dictate decisions: click-again or Esc to stop).
@@ -113,7 +138,7 @@ export function Composer({
 						act();
 					}
 				}}
-				placeholder={placeholder}
+				placeholder={effectivePlaceholder}
 				autoFocus={autoFocus}
 				rows={1}
 				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"

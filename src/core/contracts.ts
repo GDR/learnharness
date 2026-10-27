@@ -26,4 +26,5 @@ export * from "./contracts/scope.ts";
 export * from "./contracts/session.ts";
 export * from "./contracts/generation.ts";
 export * from "./contracts/retrieval.ts";
+export * from "./contracts/ask.ts";
 
