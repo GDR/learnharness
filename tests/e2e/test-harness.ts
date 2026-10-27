@@ -76,20 +76,20 @@ export interface SourceDocument {
 
 export interface SourceEvidence {
   id: EvidenceId;
-  projectId: ProjectId;
+  projectId?: ProjectId;
   sourceId: SourceId;
   documentId: DocumentId;
-  revisionId: string;
+  revisionId?: string;
   propositionId: string;
-  location: {
+  location?: {
     heading?: string;
     blockId?: string;
     startOffset?: number;
     endOffset?: number;
   };
-  provenance: "explicit-source" | "model-inferred";
-  status: "active" | "superseded";
-  extractorVersion: string;
+  provenance?: "explicit-source" | "model-inferred";
+  status?: "active" | "superseded";
+  extractorVersion?: string;
 }
 
 export interface StudyScope {
@@ -807,7 +807,7 @@ export class TestHarness {
   async recordEvidence(evidence: SourceEvidence): Promise<void> {
     const evidenceLedger = path.join(
       this.projectsDataDir,
-      evidence.projectId,
+      evidence.projectId || "proj_default",
       "graph",
       "evidence.jsonl"
     );

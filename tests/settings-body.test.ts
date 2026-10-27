@@ -66,10 +66,13 @@ describe("parseAgentSettingsBody", () => {
 		// cross-validation — the parser only sees shapes.
 	});
 
-	it("search: engine pin is tavily|brave; anything else is a 400 (search wave, 2026-09-20)", () => {
+	it("search: engine pin accepts catalog ids and rejects unknown ids", () => {
 		const ok = parseAgentSettingsBody({ search: { engine: "tavily" } });
 		assert.ok(ok.ok);
 		assert.deepEqual(ok.settings.search, { engine: "tavily" });
+		const chatgpt = parseAgentSettingsBody({ search: { engine: "chatgpt" } });
+		assert.ok(chatgpt.ok);
+		assert.deepEqual(chatgpt.settings.search, { engine: "chatgpt" });
 		const clear = parseAgentSettingsBody({ search: {} });
 		assert.ok(clear.ok);
 		assert.equal(clear.settings.search, undefined, "absent engine = back to auto-detect");
@@ -147,6 +150,7 @@ describe("parseAppearanceSettingsBody", () => {
 			fontFamily: "Some Font",
 			proseFontSize: 20,
 			sessionNameSerif: false,
+			autoCollapseQuestions: false,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
 		});
 		assert.ok(r.ok);
@@ -156,6 +160,7 @@ describe("parseAppearanceSettingsBody", () => {
 			fontFamily: "Some Font",
 			proseFontSize: 20,
 			sessionNameSerif: false,
+			autoCollapseQuestions: false,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
 		});
 	});
@@ -170,6 +175,7 @@ describe("parseAppearanceSettingsBody", () => {
 			{ proseFontSize: 30 },
 			{ proseFontSize: 64.5 },
 			{ sessionNameSerif: 1 },
+			{ autoCollapseQuestions: "no" },
 			{ mdRendering: { headingWeight: 1000 } },
 			{ mdRendering: { boldColor: "red" } },
 		];
@@ -272,6 +278,16 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 		const r = parseCompactionSettingsBody({ thresholdTokens: "big" });
 		assert.ok(!r.ok);
 		assert.match(r.error ?? "", /must be a number/);
+	});
+	it("accepts account-scoped context windows and rejects unsafe values", () => {
+		const valid = parseCompactionSettingsBody({ thresholdTokens: 800_000, contextWindows: { "chatgpt:account-a:gpt-6.1-sol": 872_000 } });
+		assert.ok(valid.ok);
+		assert.deepEqual(valid.settings.contextWindows, { "chatgpt:account-a:gpt-6.1-sol": 872_000 });
+		for (const value of [0, 31_999, 1.2, 10_000_001, "872000"]) {
+			assert.equal(parseCompactionSettingsBody({ contextWindows: { "chatgpt:account-a:gpt-6.1-sol": value } }).ok, false);
+		}
+		assert.equal(parseCompactionSettingsBody({ contextWindows: { "openai:gpt-6.1-sol": 872_000 } }).ok, false);
+		assert.equal(parseCompactionSettingsBody({ contextWindows: [] }).ok, false);
 	});
 });
 

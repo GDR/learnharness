@@ -242,6 +242,95 @@ test("account catalog is scoped, visibility filtered, and cleared on disconnect"
 	} finally { f.service.close(); }
 });
 
+test("account catalog carries validated context metadata and changes its authority when limits change", async () => {
+	let context = 500_000;
+	let maximum: unknown = 872_000;
+	const f = await loggedIn({ provider: async (url) => url.endsWith("/models") ? Response.json({ models: [
+		{ slug: "gpt-5", display_name: "Scratch", visibility: "list", context_window: context, max_context_window: maximum },
+		{ slug: "hidden", display_name: "Hidden", visibility: "hide", context_window: 100 },
+	] }) : undefined });
+	try {
+		const first = await f.service.models();
+		assert.deepEqual(first.models, [{ id: "gpt-5", name: "Scratch", contextWindow: 500_000, maxContextWindow: 872_000 }]);
+		context = 272_000; maximum = 600_000;
+		const changed = await f.service.models();
+		assert.ok(changed.authorityRevision > first.authorityRevision);
+		assert.deepEqual(changed.models[0], { id: "gpt-5", name: "Scratch", contextWindow: 272_000, maxContextWindow: 600_000 });
+		maximum = 200_000;
+		assert.deepEqual((await f.service.models()).models[0], { id: "gpt-5", name: "Scratch", contextWindow: 272_000 });
+		maximum = "872000";
+		assert.deepEqual((await f.service.models()).models[0], { id: "gpt-5", name: "Scratch", contextWindow: 272_000 });
+	} finally { f.service.close(); }
+});
+
+test("transient model discovery failure does not make a subscribed model unavailable for this turn", async () => {
+	let attempts = 0;
+	const f = await loggedIn({ provider: async (target) => {
+		if (!target.endsWith("/models")) return undefined;
+		if (++attempts === 1) return new Response("temporarily unavailable", { status: 503 });
+		return Response.json({ models: [{ slug: "gpt-5", display_name: "Scratch model", visibility: "list" }] });
+	} });
+	try {
+		const catalog = await f.service.models();
+		assert.deepEqual(catalog.models, [{ id: "gpt-5", name: "Scratch model" }], "a single recoverable discovery failure should not refuse a selected model");
+		const lease = await f.rawLease(false, { expectedAccountId: catalog.accountId, expectedAuthorityRevision: catalog.authorityRevision, selectedModelId: "gpt-5" });
+		assert.equal(lease.accessToken, "scratch-oauth-token");
+		assert.equal(attempts, 2);
+	} finally { f.service.close(); }
+});
+
+test("transient coded transport failure retries discovery without retrying auth or abort", async () => {
+	for (const [failure, retry] of [
+		[Object.assign(new Error("socket reset"), { code: "ECONNRESET" }), true],
+		[Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("socket reset"), { code: "ECONNRESET" }) }), true],
+		[Object.assign(new Error("session expired"), { code: "expired" }), false],
+		[new DOMException("aborted", "AbortError"), false],
+	] as const) {
+		let attempts = 0;
+		const f = await loggedIn({ provider: async (target) => {
+			if (!target.endsWith("/models")) return undefined;
+			if (++attempts === 1) throw failure;
+			return Response.json({ models: [{ slug: "gpt-5", display_name: "Scratch model", visibility: "list" }] });
+		} });
+		try {
+			const catalog = await f.service.models();
+			assert.equal(attempts, retry ? 2 : 1, `${failure.name}: ${failure.message}`);
+			assert.deepEqual(catalog.models.map((model: { id: string }) => model.id), retry ? ["gpt-5"] : []);
+		} finally { f.service.close(); }
+	}
+});
+
+test("catalog discovery does not retry auth or rate limits or keep stale models after persistent failure", async () => {
+	for (const responseStatus of [401, 403, 429, 503]) {
+		let attempts = 0;
+		const f = await loggedIn({ provider: async (target) => {
+			if (!target.endsWith("/models")) return undefined;
+			attempts++;
+			return new Response("temporarily unavailable", { status: responseStatus });
+		} });
+		try {
+			const catalog = await f.service.models();
+			assert.deepEqual(catalog.models, []);
+			assert.equal(attempts, responseStatus === 503 ? 2 : 1);
+			await assert.rejects(f.rawLease(false, { expectedAccountId: catalog.accountId, expectedAuthorityRevision: catalog.authorityRevision, selectedModelId: "gpt-5" }), /catalog/);
+		} finally { f.service.close(); }
+	}
+});
+
+test("revoking catalog authority during discovery prevents a second request", async () => {
+	let attempts = 0;
+	let close!: () => void;
+	const f = await loggedIn({ provider: async (target) => {
+		if (!target.endsWith("/models")) return undefined;
+		attempts++;
+		close();
+		return new Response("temporarily unavailable", { status: 503 });
+	} });
+	close = () => f.service.close();
+	const catalog = await f.service.models();
+	assert.deepEqual(catalog.models, []);
+	assert.equal(attempts, 1);
+});
 test("private JSON file round-trips global state; creation and atomic replacement are owner-only", async () => {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-chatgpt-storage-"));
 	const file = path.join(dir, "private", "chatgpt-credentials.json");

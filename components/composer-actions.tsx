@@ -1,17 +1,104 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { DumbbellIcon } from "lucide-react";
+import { DumbbellIcon, GraduationCapIcon, MessageSquareIcon, SearchIcon } from "lucide-react";
+
+export type ComposerMode = "chat" | "study" | "practice" | "ask";
+
+/**
+ * Toggle pill between Chat, Study, Practice, and Ask Sources mode.
+ */
+export function ComposerModeToggle({
+	mode = "chat",
+	onChange,
+}: {
+	mode?: ComposerMode;
+	onChange?: (mode: ComposerMode) => void;
+}) {
+	return (
+		<div
+			data-testid="composer-mode-toggle"
+			className="flex items-center rounded-full border border-border bg-card/60 p-0.5"
+		>
+			<button
+				type="button"
+				data-testid="composer-mode-chat"
+				onClick={() => onChange?.("chat")}
+				className={`flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 font-ui text-xs transition-colors ${
+					mode === "chat"
+						? "bg-primary text-primary-foreground font-medium shadow-xs"
+						: "text-muted-foreground hover:text-foreground"
+				}`}
+			>
+				<MessageSquareIcon className="size-3" aria-hidden="true" />
+				Chat
+			</button>
+			<button
+				type="button"
+				data-testid="composer-mode-study"
+				onClick={() => onChange?.("study")}
+				className={`flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 font-ui text-xs transition-colors ${
+					mode === "study"
+						? "bg-primary text-primary-foreground font-medium shadow-xs"
+						: "text-muted-foreground hover:text-foreground"
+				}`}
+			>
+				<GraduationCapIcon className="size-3" aria-hidden="true" />
+				Study
+			</button>
+			<button
+				type="button"
+				data-testid="composer-mode-practice"
+				onClick={() => onChange?.("practice")}
+				className={`flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 font-ui text-xs transition-colors ${
+					mode === "practice"
+						? "bg-primary text-primary-foreground font-medium shadow-xs"
+						: "text-muted-foreground hover:text-foreground"
+				}`}
+			>
+				<DumbbellIcon className="size-3" aria-hidden="true" />
+				Practice
+			</button>
+			<button
+				type="button"
+				data-testid="composer-mode-ask"
+				onClick={() => onChange?.("ask")}
+				className={`flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 font-ui text-xs transition-colors ${
+					mode === "ask"
+						? "bg-primary text-primary-foreground font-medium shadow-xs"
+						: "text-muted-foreground hover:text-foreground"
+				}`}
+			>
+				<SearchIcon className="size-3" aria-hidden="true" />
+				Ask Sources
+			</button>
+		</div>
+	);
+}
 
 /** Home and the draft share one wrapping action row. Picker controls lead;
  * setup is centered only when it is the sole action. */
-export function ComposerActions({ picker, setup }: { picker?: ReactNode; setup?: ReactNode }) {
-	if (!picker && !setup) return null;
+export function ComposerActions({
+	picker,
+	setup,
+	modeToggle,
+	scope,
+}: {
+	picker?: ReactNode;
+	setup?: ReactNode;
+	modeToggle?: ReactNode;
+	scope?: ReactNode;
+}) {
+	if (!picker && !setup && !modeToggle && !scope) return null;
 	return (
 		<div
 			data-testid="composer-actions"
-			className={`pointer-events-auto mb-2 flex flex-wrap items-center gap-2 ${picker ? "justify-start" : "justify-center"}`}
+			className={`pointer-events-auto mb-2 flex flex-wrap items-center gap-2 ${
+				picker || modeToggle || scope ? "justify-start" : "justify-center"
+			}`}
 		>
+			{modeToggle}
+			{scope}
 			{picker}
 			{setup}
 		</div>
@@ -20,7 +107,11 @@ export function ComposerActions({ picker, setup }: { picker?: ReactNode; setup?:
 
 /** Count and Clear stay together if the setup action wraps onto another line.
  * These are node counts, even when a whole chain supplied the selection. */
-export function NodePickerControl({ count, onOpen, onClear }: {
+export function NodePickerControl({
+	count,
+	onOpen,
+	onClear,
+}: {
 	count: number;
 	onOpen?: () => void;
 	onClear?: () => void;

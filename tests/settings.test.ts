@@ -32,6 +32,7 @@ describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 		assert.equal(a.fontFamily, null); // Source Sans 3
 		assert.equal(a.proseFontSize, 16);
 		assert.equal(a.sessionNameSerif, true);
+		assert.equal(a.autoCollapseQuestions, true); // today's behavior
 		assert.equal(a.mdRendering.headingWeight, 900);
 		assert.equal(a.mdRendering.boldColor, null); // white
 		assert.equal(a.mdRendering.italicColor, null);
@@ -53,6 +54,13 @@ describe("isHexColor", () => {
 });
 
 describe("sanitizeUserSettings", () => {
+	it("sanitizes compaction even when no graph section exists", () => {
+		const value = sanitizeUserSettings({ version: 1, compaction: { thresholdTokens: 800_000, contextWindows: {
+			"chatgpt:account-a:gpt-6.1-sol": 872_000, "chatgpt:account-b:gpt-6.1-sol": -1, "openai:gpt-6.1-sol": 999_999,
+		} } });
+		assert.deepEqual(value?.compaction, { thresholdTokens: 800_000, contextWindows: { "chatgpt:account-a:gpt-6.1-sol": 872_000 } });
+		assert.equal(sanitizeUserSettings({ compaction: "invalid" })?.compaction, undefined);
+	});
 	it("round-trips a fully valid record field-for-field", () => {
 		const record = {
 			version: 1,
