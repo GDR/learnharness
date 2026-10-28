@@ -115,18 +115,26 @@ jobs:
           cache: npm
       # The mac icon is the Icon Composer document (build/icon.icon);
       # compiling it requires actool ≥ 26 (Xcode 26.3 on macos-15).
-      # On macOS 15:
-      # 1. actool's ictool helper links against macOS 26 private frameworks
+      # On macOS 15 VMs:
+      # 1. actool's ibtoold links against macOS 26 private frameworks
       #    (IconRendering, RenderBox, CoreSVG, CoreUI, IconServices,
       #    IconFoundation) bundled inside MacOSX.platform's AssetRuntime.
       #    Wrapping Xcode's actool with DYLD_FRAMEWORK_PATH pointed at
       #    AssetRuntime avoids the SIP /usr/bin stub stripping DYLD_* and
-      #    lets ictool/ibtoold load Xcode 26's bundled frameworks.
+      #    lets ibtoold load Xcode 26's bundled frameworks.
       # 2. AssetCatalogAgent-AssetRuntime (the out-of-process LAR helper)
       #    aborts on macOS 15 via IBAssertLARDenyListIfNeeded() because
       #    macOS 15 system frameworks transitively pull in AVFoundation.
       #    Setting IBICLightweightAssetRuntimeMode=DISABLED makes ibtoold
       #    compile Assets.car in-process using the AssetRuntime frameworks.
+      # 3. IconRendering.framework passes a swift_slowAlloc buffer to
+      #    -[IOGPUMetalDevice newBufferWithBytesNoCopy:...] which on macOS 15's
+      #    AppleParavirtGPUMetalIOGPUFamily touches the page start before
+      #    non-page-aligned pointers and corrupts malloc metadata; running
+      #    compile calls under libgmalloc with MALLOC_PROTECT_BEFORE=1
+      #    page-aligns allocations with a leading guard page.
+      # 4. electron-builder merges stdout+stderr when parsing `actool --version`
+      #    as an XML plist, so `--version` runs directly without libgmalloc.
       - name: Select Xcode 26.3 for actool (mac icon compile)
         if: runner.os == 'macOS'
         uses: maxim-lobanov/setup-xcode@v1
@@ -143,13 +151,15 @@ jobs:
           cat << 'EOF' > "$WRAPPER_DIR/actool"
           #!/bin/sh
           DEV_DIR="$(xcode-select -p)"
-          export DYLD_FRAMEWORK_PATH="$DEV_DIR/Platforms/MacOSX.platform/System/AssetRuntime/System/Library/PrivateFrameworks"
-          export IBICLightweightAssetRuntimeMode="DISABLED"
           export IBToolNeverDeque="1"
           if [ "$1" = "--version" ]; then
             exec "$DEV_DIR/usr/bin/actool" "$@" 2>/dev/null
           fi
-          exec "$DEV_DIR/usr/bin/actool" --lightweight-asset-runtime-mode disabled "$@"
+          export DYLD_FRAMEWORK_PATH="$DEV_DIR/Platforms/MacOSX.platform/System/AssetRuntime/System/Library/PrivateFrameworks"
+          export IBICLightweightAssetRuntimeMode="DISABLED"
+          export MALLOC_PROTECT_BEFORE="1"
+          export DYLD_INSERT_LIBRARIES="/usr/lib/libgmalloc.dylib"
+          exec "$DEV_DIR/usr/bin/actool" "$@"
           EOF
           chmod +x "$WRAPPER_DIR/actool"
           echo "$WRAPPER_DIR" >> "$GITHUB_PATH"

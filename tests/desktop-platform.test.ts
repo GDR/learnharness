@@ -286,7 +286,8 @@ describe("desktop release workflow", () => {
 		assert.ok(assetRuntimeStep?.run?.includes("Platforms/MacOSX.platform/System/AssetRuntime/System/Library/PrivateFrameworks"));
 		assert.ok(assetRuntimeStep?.run?.includes('IBICLightweightAssetRuntimeMode="DISABLED"'));
 		assert.ok(assetRuntimeStep?.run?.includes('IBToolNeverDeque="1"'));
-		assert.ok(assetRuntimeStep?.run?.includes("--lightweight-asset-runtime-mode disabled"));
+		assert.ok(assetRuntimeStep?.run?.includes('MALLOC_PROTECT_BEFORE="1"'));
+		assert.ok(assetRuntimeStep?.run?.includes('DYLD_INSERT_LIBRARIES="/usr/lib/libgmalloc.dylib"'));
 		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
 		assert.ok(buildIndex > xcodeIndex + 1, "select Xcode and configure AssetRuntime before packaging compiles the icon");
 
