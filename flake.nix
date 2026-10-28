@@ -23,7 +23,7 @@
 
             src = pkgs.fetchurl {
               url = "https://github.com/GDR/learnharness/releases/download/v${version}/LearnHarness-${version}-arm64-mac.zip";
-              hash = "sha256-2yE01hPf0h56dyZO9Z3o9Ak1qPN+qXqnGt4eC+olXIY=";
+              hash = "sha256-qsx6nprwnsfjk+0aySfnZpW1sTEMcJFpuaJuqymrWb8=";
             };
 
             nativeBuildInputs = [
@@ -65,7 +65,7 @@
             let
               src = pkgs.fetchurl {
                 url = "https://github.com/GDR/learnharness/releases/download/v${version}/LearnHarness-${version}-x86_64.AppImage";
-                hash = "sha256-7zRlGDOxGOpcdEnM2UUFgBB66xg+bHGrFQdrQ7xFGOw=";
+                hash = "sha256-0tF+rjrcyiiqzQvAgS/gYhP3fkMIoNyxFL1QGckQOs4=";
               };
               extracted = pkgs.appimageTools.extract { inherit pname version src; };
             in
